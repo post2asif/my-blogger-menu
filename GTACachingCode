@@ -1,0 +1,2640 @@
+Imports System.Text
+Imports System.Net
+Imports System.IO
+Imports MySql.Data.MySqlClient
+Imports System.Xml
+
+Module Module1
+    Dim dsGTADBXML As DataSet = New DataSet()
+    Dim insertQuery As String = String.Empty
+    Dim selectQuery As String = String.Empty
+    Dim reqXMLPayLoad As String = String.Empty
+    Dim csvFilePath As String = "E:\GTACache\QueryFiles\CSVFiles"
+    Dim txtFilePath As String = "E:\GTACache\QueryFiles\TXTFiles"
+    Dim errorLogPath As String = "E:\GTACache\ErrorLog.txt"
+    Dim errorLogFileWriter As StreamWriter
+    Dim gtaServiceResponse As String = String.Empty
+    Dim gtaServiceErrorMessage As String = String.Empty
+
+    Private csvFieldValue As String = String.Empty
+    Private txtFieldValue As String = String.Empty
+    Private dtColumnValue As StringBuilder = New StringBuilder(String.Empty)
+
+    
+
+    Dim dsGtaCacheResponse As DataSet = New DataSet()
+    Dim htlCode As String = String.Empty
+    Dim totalRecords As UInt32 = 0
+
+
+    Public Property csvFieldValuePrprty() As String
+        Get
+            Return csvFieldValue
+        End Get
+        Set(ByVal value As String)
+            If String.IsNullOrEmpty(value) Then
+                csvFieldValue = "\N"
+            Else
+                csvFieldValue = value.Replace("'", "''").Replace(",", ";")
+            End If
+        End Set
+    End Property
+    Public Property txtFieldValuePrprty() As String
+        Get
+            Return txtFieldValue
+        End Get
+        Set(ByVal value As String)
+            If String.IsNullOrEmpty(value) Then
+                txtFieldValue = "''"
+            Else
+                txtFieldValue = value.Replace("'", "''").Replace("\", "")
+                txtFieldValue = String.Format("'{0}'", txtFieldValue)
+            End If
+        End Set
+    End Property
+
+    Sub Main()
+        Try
+            CacheCities()
+            'GenerateCityCacheRequest("ALV")
+            'GTAServiceCall()
+            Console.WriteLine("Caching is over/stopped!!!")
+            Console.ReadKey()
+        Catch ex As Exception
+            Throw ex
+        End Try
+    End Sub
+
+#Region "GTA"
+    Private Sub GenerateCityCacheRequest(ByVal cityCode As String)
+        Dim xmlReq As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            With xmlReq
+                .AppendLine("<?xml version=""1.0"" encoding=""UTF-8"" ?>")
+                .AppendLine("<Request>")
+                .AppendLine("<Source>")
+                .AppendLine(String.Format("<RequestorID Client=""{0}"" EMailAddress=""{1}"" Password=""{2}"" />", 123, "test@test.com", "123"))
+                .AppendLine(String.Format("<RequestorPreferences Language=""{0}"">", "en"))
+                .AppendLine("<RequestMode>SYNCHRONOUS</RequestMode>")
+                .AppendLine("</RequestorPreferences>")
+                .AppendLine("</Source>")
+                .AppendLine("<RequestDetails>")
+                .AppendLine("<SearchItemInformationRequest ItemType=""hotel"">")
+                .AppendLine(String.Format("<ItemDestination DestinationType=""city"" DestinationCode=""{0}"" />", cityCode))
+                .AppendLine("<SearchHotelInformation />")
+                .AppendLine("</SearchItemInformationRequest>")
+                .AppendLine("</RequestDetails>")
+                .AppendLine("</Request>")
+            End With
+            reqXMLPayLoad = xmlReq.ToString()
+        Catch ex As Exception
+            Console.WriteLine(ex.ToString())
+        End Try
+    End Sub
+
+    Private Sub GenerateGTACountryListRequest()
+        Dim xmlReq As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            With xmlReq
+                .AppendLine("<?xml version=""1.0"" encoding=""UTF-8"" ?>")
+                .AppendLine("<Request>")
+                .AppendLine("<Source>")
+                .AppendLine(String.Format("<RequestorID Client=""{0}"" EMailAddress=""{1}"" Password=""{2}"" />", 123, "test@test.com", "123"))
+                .AppendLine(String.Format("<RequestorPreferences Language=""{0}"">", "en"))
+                .AppendLine("<RequestMode>SYNCHRONOUS</RequestMode>")
+                .AppendLine("</RequestorPreferences>")
+                .AppendLine("</Source>")
+                .AppendLine("<RequestDetails>")
+                .AppendLine("<SearchCountryRequest>")
+                .AppendLine(String.Format("<CountryName>{0}</CountryName>", String.Empty))
+                .AppendLine("</SearchCountryRequest>")
+                .AppendLine("</RequestDetails>")
+                .AppendLine("</Request>")
+            End With
+            reqXMLPayLoad = xmlReq.ToString()
+        Catch ex As Exception
+            Console.WriteLine(ex.ToString())
+        End Try
+    End Sub
+
+    Private Sub GenerateGTACountrysCityListRequest(ByVal countryCode As String)
+        Dim xmlReq As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            With xmlReq
+                .AppendLine("<?xml version=""1.0"" encoding=""UTF-8"" ?>")
+                .AppendLine("<Request>")
+                .AppendLine("<Source>")
+                .AppendLine(String.Format("<RequestorID Client=""{0}"" EMailAddress=""{1}"" Password=""{2}"" />",  123, "test@test.com", "123"))
+                .AppendLine(String.Format("<RequestorPreferences Language=""{0}"">", "en"))
+                .AppendLine("<RequestMode>SYNCHRONOUS</RequestMode>")
+                .AppendLine("</RequestorPreferences>")
+                .AppendLine("</Source>")
+                .AppendLine("<RequestDetails>")
+                .AppendLine(String.Format("<SearchCityRequest CountryCode=""{0}"">", countryCode))
+                .AppendLine(String.Format("<CityName>{0}</CityName>", String.Empty))
+                .AppendLine("</SearchCityRequest>")
+                .AppendLine("</RequestDetails>")
+                .AppendLine("</Request>")
+            End With
+            reqXMLPayLoad = xmlReq.ToString()
+        Catch ex As Exception
+            Console.WriteLine(ex.ToString())
+        End Try
+    End Sub
+
+    Private Sub GTAServiceCall()
+        Dim gtaDataSet As DataSet = New DataSet()
+        gtaServiceErrorMessage = String.Empty
+        gtaServiceResponse = String.Empty
+        Try
+            Dim wr As HttpWebRequest = HttpWebRequest.Create("url")
+            Dim creds As New Net.NetworkCredential()
+            wr.Credentials = creds
+            wr.Timeout = 500000
+            wr.Method = "POST"
+            wr.AllowWriteStreamBuffering = True
+            wr.ContentType = "text/xml"
+            wr.KeepAlive = False
+            wr.ProtocolVersion = HttpVersion.Version10
+            Dim Responses As HttpWebResponse = Nothing
+            Dim wrStream As System.IO.Stream = wr.GetRequestStream
+            Dim Writer As New System.IO.StreamWriter(wrStream)
+            Writer.WriteLine(reqXMLPayLoad)
+            Writer.Close()
+            Responses = wr.GetResponse()
+            Dim strread As System.IO.StreamReader = New System.IO.StreamReader(Responses.GetResponseStream)
+            gtaServiceResponse = strread.ReadToEnd
+            strread.Close()
+
+            dsGtaCacheResponse.Reset()
+            dsGtaCacheResponse.ReadXml(New StringReader(gtaServiceResponse))
+            
+            'dsGtaCacheResponse.WriteXml("E:\GTACache\ConsoleApplication1\CacheResponseALV.xml")
+            'dsGtaCacheResponse.WriteXmlSchema("E:\GTACache\ConsoleApplication1\CacheResponseALV.xsd")
+        Catch webex As WebException
+            Dim webResponse As WebResponse = webex.Response
+            Dim stream As System.IO.Stream = webResponse.GetResponseStream()
+            Dim resonseMessage As String = New StreamReader(stream).ReadToEnd()
+            gtaServiceErrorMessage = resonseMessage
+        Catch ex As Exception
+            gtaServiceErrorMessage = ex.ToString()
+        End Try
+    End Sub
+#End Region
+
+    Private Function getColumnValue(ByVal row As DataRow, ByVal colName As String) As String
+        Dim columnValue As String = String.Empty
+        Try
+            If row.Table.Columns.Contains(colName) Then
+                If Not IsDBNull(row(colName)) Then
+                    columnValue = row(colName)
+                End If
+            End If
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValue
+    End Function
+
+#Region "QueryGenerator functions"
+
+    Private Sub GenerateAllCsvAndTxtFiles()
+        selectQuery = "select Country_Code,City_ID,city_code from atsgen_m_gtacity order by city_ID ASC;"
+        Dim dtCityCodeList As DataTable = ReadFromDB()
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Dim dsGtaCityCacheResponse As DataSet = New DataSet()
+
+
+        Dim csvColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim txtColumnValues As StringBuilder = New StringBuilder(String.Empty)
+
+
+        Dim hotelIDPkey As ULong = 0
+        Dim hotelCodeCsvFormat As String = String.Empty
+        Dim hotelCodeMultipleRowFormat As String = String.Empty
+
+
+        '''''''''filteredRows'''''''''''
+        Dim filteredRowsItemDetail() As DataRow = Nothing
+        Dim filteredRowsItem() As DataRow = Nothing
+        Dim filteredRowsRoomTypes() As DataRow = Nothing
+        Dim filteredRowsGeoCodes() As DataRow = Nothing
+        Dim filteredRowsLinks() As DataRow = Nothing
+        Dim filteredRowsAddressLines() As DataRow = Nothing
+        Dim filteredRowsImageLinks() As DataRow = Nothing
+        Dim filteredRowsImageLink() As DataRow = Nothing
+        Dim filteredRowsRoomType() As DataRow = Nothing
+        Dim filteredRowsAreaDetails() As DataRow = Nothing
+        Dim filteredRowsAreaDetail() As DataRow = Nothing
+        Dim filteredRowsFacilities() As DataRow = Nothing
+        Dim filteredRowsFacility() As DataRow = Nothing
+        Dim filteredRowsLocationDetails() As DataRow = Nothing
+        Dim filteredRowsLocation() As DataRow = Nothing
+        Dim filteredRowsReports() As DataRow = Nothing
+        Dim filteredRowsReport() As DataRow = Nothing
+
+        Dim address3And4 As StringBuilder = New StringBuilder(String.Empty)
+
+
+
+        Dim countryCode As String = String.Empty
+        Dim cityCode As String = String.Empty
+        Dim cityID As UShort = 0
+        Dim totalRows As UInt32 = 0
+
+
+
+        Dim htlIndex As UShort = 0
+        Dim imgIndex As UShort = 0
+        Dim roomTypeIndex As UShort = 0
+        Dim areaDetlsIndex As UShort = 0
+        Dim facilityIndex As UShort = 0
+        Dim locationIndex As UShort = 0
+        Dim repotDetlsIndex As UShort = 0
+
+
+        Dim totalHotels As UShort = 0
+        Dim totalImages As UShort = 0
+        Dim totalAreas As UShort = 0
+        Dim totalReports As UShort = 0
+        Dim totalRoomTypes As UShort = 0
+        Dim totalFacilities As UShort = 0
+        Dim totalLocations As UShort = 0
+
+        Dim fileNames() As String = {"HotelDetails", "HotelImages", "HotelRoomTypes", "HotelAreaDetails", "HotelFacilities", "HotelLocations", "HotelReports"}
+        Dim fullPath As String = String.Empty
+        Try
+            'Create TXT & CSV files if not exist
+            For Each file As String In fileNames
+                fullPath = txtFilePath + "\" + file + ".txt"
+                If Not System.IO.File.Exists(fullPath) Then
+                    Using fs = System.IO.File.Create(fullPath)
+
+                    End Using
+                End If
+                fullPath = csvFilePath + "\" + file + ".csv"
+                If Not System.IO.File.Exists(fullPath) Then
+                    Using fs = System.IO.File.Create(fullPath)
+
+                    End Using
+                End If
+            Next
+
+            'Create ErrorLog file if not exist
+            If Not System.IO.File.Exists(errorLogPath) Then
+                Using fs = System.IO.File.Create(errorLogPath)
+
+                End Using
+            End If
+
+            'Clear ErrorLog file
+            Using ErrorLog = New FileStream(errorLogPath, FileMode.Truncate)
+
+            End Using
+
+
+            'Clear All CSV files
+            Using htlDetailFile = New FileStream(csvFilePath + "\HotelDetails.csv", FileMode.Truncate), htlImagesFile = New FileStream(csvFilePath + "\HotelImages.csv", FileMode.Truncate), htlRoomTypesFile = New FileStream(csvFilePath + "\HotelRoomTypes.csv", FileMode.Truncate), htlAreaDetlsFile = New FileStream(csvFilePath + "\HotelAreaDetails.csv", FileMode.Truncate), htlFacilitiesFile = New FileStream(csvFilePath + "\HotelFacilities.csv", FileMode.Truncate), htlLocationsFile = New FileStream(csvFilePath + "\HotelLocations.csv", FileMode.Truncate), htlReportsFile = New FileStream(csvFilePath + "\HotelReports.csv", FileMode.Truncate)
+
+            End Using
+
+            'Clear All txt Files 
+            Using htlDetailFile = New FileStream(txtFilePath + "\HotelDetails.txt", FileMode.Truncate), htlImagesFile = New FileStream(txtFilePath + "\HotelImages.txt", FileMode.Truncate), htlRoomTypesFile = New FileStream(txtFilePath + "\HotelRoomTypes.txt", FileMode.Truncate), htlAreaDetlsFile = New FileStream(txtFilePath + "\HotelAreaDetails.txt", FileMode.Truncate), htlFacilitiesFile = New FileStream(txtFilePath + "\HotelFacilities.txt", FileMode.Truncate), htlLocationsFile = New FileStream(txtFilePath + "\HotelLocations.txt", FileMode.Truncate), htlReportsFile = New FileStream(txtFilePath + "\HotelReports.txt", FileMode.Truncate)
+
+            End Using
+
+
+            'Write to files
+            Using hotelDetailsCSVFileWriter = New StreamWriter(csvFilePath + "\HotelDetails.csv", True), hotelImagesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelImages.csv", True), HotelRoomTypesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelRoomTypes.csv", True), HotelAreaDetailsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelAreaDetails.csv", True), HotelFacilitiesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelFacilities.csv", True), HotelLocationsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelLocations.csv", True), HotelReportsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelReports.csv", True), hotelDetailsTXTFileWriter = New StreamWriter(txtFilePath + "\HotelDetails.txt", True), hotelImagesTXTFileWriter = New StreamWriter(txtFilePath + "\HotelImages.txt", True), HotelRoomTypesTXTFileWriter = New StreamWriter(txtFilePath + "\HotelRoomTypes.txt", True), HotelAreaDetailsTXTFileWriter = New StreamWriter(txtFilePath + "\HotelAreaDetails.txt", True), HotelFacilitiesTXTFileWriter = New StreamWriter(txtFilePath + "\HotelFacilities.txt", True), HotelLocationsTXTFileWriter = New StreamWriter(txtFilePath + "\HotelLocations.txt", True), HotelReportsTXTFileWriter = New StreamWriter(txtFilePath + "\HotelReports.txt", True)
+
+
+
+                hotelDetailsTXTFileWriter.Write("INSERT INTO atsgen_m_gtahoteldetails (Hotel_ID,City_Id,CityCode,HotelCode,HotelName,Copyright,TotalRooms,Latitude,Longitude,StarRating,Category,MapPageLink,Address1,Address2,Address3,Telephone,Fax,Website) VALUES ")
+                hotelImagesTXTFileWriter.Write("INSERT INTO atsgen_m_gtahotelimages (Hotel_ID,ItemCode,ImageLink,ThumbNail,ImageDetails,Height,Width) VALUES ")
+                HotelRoomTypesTXTFileWriter.Write("INSERT INTO atsgen_m_gtaroomtypes (Hotel_ID,ItemCode,RoomTypes) VALUES ")
+                HotelAreaDetailsTXTFileWriter.Write("INSERT INTO atsgen_m_gtaareadetails (Hotel_ID,ItemCode,AreaDetails) VALUES ")
+                HotelFacilitiesTXTFileWriter.Write("INSERT INTO atsgen_m_gtafecilitydetails (Hotel_ID,ItemCode,FecilityCode,FecilityDetails) VALUES ")
+                HotelLocationsTXTFileWriter.Write("INSERT INTO atsgen_m_gtalocationdetails (Hotel_ID,ItemCode,LocationCode,LocationName) VALUES ")
+                HotelReportsTXTFileWriter.Write("INSERT INTO atsgen_m_gtareportdetails (Hotel_ID,ItemCode,Type,ReportDetails) VALUES ")
+
+
+                For cityIndex = 0 To dtCityCodeList.Rows.Count - 1
+                    errorMessage.Clear()
+                    totalHotels = 0
+                    totalImages = 0
+                    totalAreas = 0
+                    totalReports = 0
+                    totalRoomTypes = 0
+                    totalFacilities = 0
+                    totalLocations = 0
+
+
+                    countryCode = dtCityCodeList.Rows(cityIndex)("Country_Code")
+                    cityCode = dtCityCodeList.Rows(cityIndex)("city_code")
+                    cityID = dtCityCodeList.Rows(cityIndex)("City_ID")
+                    Try
+                        If cityIndex < 1 Then
+                            htlIndex = 0
+                            hotelIDPkey = dtCityCodeList.Rows(cityIndex)("City_ID") * 10000
+                            'GenerateCityCacheRequest(dtCityCodeList.Rows(cityIndex)("city_code"))
+                            'GTAServiceCall()
+
+                            gtaServiceResponse = File.ReadAllText("E:\GTACache\ConsoleApplication1\CacheResponse.xml")
+
+                            errorMessage.Append(gtaServiceErrorMessage)
+                            If Not String.IsNullOrEmpty(gtaServiceResponse) AndAlso String.IsNullOrEmpty(gtaServiceErrorMessage) Then
+                                dsGtaCityCacheResponse.Reset()
+                                dsGtaCityCacheResponse.ReadXml(New StringReader(gtaServiceResponse))
+                                For Each HotelInformationRow As DataRow In dsGtaCityCacheResponse.Tables("HotelInformation").Rows
+                                    totalHotels = dsGtaCityCacheResponse.Tables("HotelInformation").Rows.Count
+
+
+                                    'CSV section of HotelDetails
+                                    csvColumnValues.Clear()
+                                    With csvColumnValues
+                                        .Append(String.Format("{0},", hotelIDPkey))
+                                        .Append(String.Format("{0},", dtCityCodeList.Rows(cityIndex)("City_ID")))
+                                        csvFieldValuePrprty = dtCityCodeList.Rows(cityIndex)("city_code")
+                                        .Append(String.Format("{0},", csvFieldValue))
+                                        filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                        For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                            filteredRowsItem = dsGtaCityCacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                            If filteredRowsItem.Count > 0 Then
+                                                csvFieldValuePrprty = filteredRowsItem(0)("Code")
+                                                hotelCodeCsvFormat = csvFieldValue
+                                                txtFieldValuePrprty = filteredRowsItem(0)("Code")
+                                                hotelCodeMultipleRowFormat = txtFieldValue
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = filteredRowsItem(0)("Item_Text")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End If
+                                        Next
+                                        If filteredRowsItemDetail.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsItemDetail(0)("Copyright")), String.Empty, filteredRowsItemDetail(0)("Copyright"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsRoomTypes.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsRoomTypes(0)("RoomCount")), String.Empty, filteredRowsRoomTypes(0)("RoomCount"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        filteredRowsGeoCodes = dsGtaCityCacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsGeoCodes.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Latitude")), String.Empty, filteredRowsGeoCodes(0)("Latitude"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Longitude")), String.Empty, filteredRowsGeoCodes(0)("Longitude"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        csvFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("StarRating")), String.Empty, HotelInformationRow("StarRating"))
+                                        .Append(String.Format("{0},", csvFieldValue))
+                                        csvFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("Category")), String.Empty, HotelInformationRow("Category"))
+                                        .Append(String.Format("{0},", csvFieldValue))
+
+                                        filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        For Each LinksRow As DataRow In filteredRowsLinks
+                                            filteredRowsLinks = dsGtaCityCacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                            If filteredRowsLinks.Count > 0 Then
+                                                csvFieldValuePrprty = IIf(IsDBNull(filteredRowsLinks(0)("MapPageLink")), String.Empty, filteredRowsLinks(0)("MapPageLink"))
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            Else
+                                                csvFieldValuePrprty = String.Empty
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End If
+                                        Next
+                                        filteredRowsAddressLines = dsGtaCityCacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsAddressLines.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine1")), String.Empty, filteredRowsAddressLines(0)("AddressLine1"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine2")), String.Empty, filteredRowsAddressLines(0)("AddressLine2"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            address3And4.Clear()
+                                            address3And4.Append(IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine3")), String.Empty, filteredRowsAddressLines(0)("AddressLine3")))
+                                            address3And4.Append(" , " + IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine4")), String.Empty, filteredRowsAddressLines(0)("AddressLine4")))
+                                            csvFieldValuePrprty = address3And4.ToString()
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Telephone")), String.Empty, filteredRowsAddressLines(0)("Telephone"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Fax")), String.Empty, filteredRowsAddressLines(0)("Fax"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("WebSite")), String.Empty, filteredRowsAddressLines(0)("WebSite"))
+                                            .Append(String.Format("{0}", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                    End With
+                                    hotelDetailsCSVFileWriter.WriteLine(csvColumnValues.ToString())
+                                    hotelDetailsCSVFileWriter.Flush()
+
+                                    'txt Section of HotelDetails
+                                    txtColumnValues.Clear()
+                                    With txtColumnValues
+                                        .Append(String.Format("{0},", hotelIDPkey))
+                                        .Append(String.Format("{0},", dtCityCodeList.Rows(cityIndex)("City_ID")))
+                                        txtFieldValuePrprty = dtCityCodeList.Rows(cityIndex)("city_code")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                        For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                            filteredRowsItem = dsGtaCityCacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                            If filteredRowsItem.Count > 0 Then
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = filteredRowsItem(0)("Item_Text")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            End If
+                                        Next
+                                        If filteredRowsItemDetail.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsItemDetail(0)("Copyright")), String.Empty, filteredRowsItemDetail(0)("Copyright"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsRoomTypes.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsRoomTypes(0)("RoomCount")), String.Empty, filteredRowsRoomTypes(0)("RoomCount"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        filteredRowsGeoCodes = dsGtaCityCacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsGeoCodes.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Latitude")), String.Empty, filteredRowsGeoCodes(0)("Latitude"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Longitude")), String.Empty, filteredRowsGeoCodes(0)("Longitude"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        txtFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("StarRating")), String.Empty, HotelInformationRow("StarRating"))
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("Category")), String.Empty, HotelInformationRow("Category"))
+                                        .Append(String.Format("{0},", txtFieldValue))
+
+                                        filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        For Each LinksRow As DataRow In filteredRowsLinks
+                                            filteredRowsLinks = dsGtaCityCacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                            If filteredRowsLinks.Count > 0 Then
+                                                txtFieldValuePrprty = IIf(IsDBNull(filteredRowsLinks(0)("MapPageLink")), String.Empty, filteredRowsLinks(0)("MapPageLink"))
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            Else
+                                                txtFieldValuePrprty = String.Empty
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            End If
+                                        Next
+                                        filteredRowsAddressLines = dsGtaCityCacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsAddressLines.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine1")), String.Empty, filteredRowsAddressLines(0)("AddressLine1"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine2")), String.Empty, filteredRowsAddressLines(0)("AddressLine2"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            address3And4.Clear()
+                                            address3And4.Append(IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine3")), String.Empty, filteredRowsAddressLines(0)("AddressLine3")))
+                                            address3And4.Append(" , " + IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine4")), String.Empty, filteredRowsAddressLines(0)("AddressLine4")))
+                                            txtFieldValuePrprty = address3And4.ToString()
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Telephone")), String.Empty, filteredRowsAddressLines(0)("Telephone"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Fax")), String.Empty, filteredRowsAddressLines(0)("Fax"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("WebSite")), String.Empty, filteredRowsAddressLines(0)("WebSite"))
+                                            .Append(String.Format("{0}", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                    End With
+                                    hotelDetailsTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                    If htlIndex = totalHotels - 1 Then
+                                        hotelDetailsTXTFileWriter.Write(";")
+                                    Else
+                                        hotelDetailsTXTFileWriter.Write(",")
+                                    End If
+
+
+                                    filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each LinksRow As DataRow In filteredRowsLinks
+                                        filteredRowsImageLinks = dsGtaCityCacheResponse.Tables("ImageLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                        For Each ImageLinksRow As DataRow In filteredRowsImageLinks
+                                            filteredRowsImageLink = dsGtaCityCacheResponse.Tables("ImageLink").Select(String.Format("ImageLinks_Id={0}", ImageLinksRow("ImageLinks_Id")))
+                                            totalImages += filteredRowsImageLink.Count
+                                            imgIndex = 0
+                                            For Each ImageLinkRow As DataRow In filteredRowsImageLink
+                                                'CSV section of hotelImages
+                                                csvColumnValues.Clear()
+                                                With csvColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                    csvFieldValuePrprty = ImageLinkRow("Image")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("ThumbNail")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Text")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Height")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Width")
+                                                    .Append(String.Format("{0}", csvFieldValue))
+                                                End With
+                                                hotelImagesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                                hotelImagesCsvFileWriter.Flush()
+                                                'txt Section of hotelImages
+                                                txtColumnValues.Clear()
+                                                With txtColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                    txtFieldValuePrprty = ImageLinkRow("Image")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("ThumbNail")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Text")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Height")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Width")
+                                                    .Append(String.Format("{0}", txtFieldValue))
+                                                End With
+                                                hotelImagesTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                                If htlIndex = totalHotels - 1 AndAlso imgIndex = filteredRowsImageLink.Count - 1 Then
+                                                    hotelImagesTXTFileWriter.Write(";")
+                                                Else
+                                                    hotelImagesTXTFileWriter.Write(",")
+                                                End If
+                                                imgIndex += 1
+                                            Next
+                                        Next
+                                    Next
+
+                                    filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each RoomTypesRow As DataRow In filteredRowsRoomTypes
+                                        filteredRowsRoomType = dsGtaCityCacheResponse.Tables("RoomType").Select(String.Format("RoomTypes_Id={0}", RoomTypesRow("RoomTypes_Id")))
+                                        totalRoomTypes += filteredRowsRoomType.Count
+                                        roomTypeIndex = 0
+                                        For Each RoomTypeRow As DataRow In filteredRowsRoomType
+                                            'CSV section of RoomTypes
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = RoomTypeRow("RoomType_Text")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End With
+                                            HotelRoomTypesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelRoomTypesCsvFileWriter.Flush()
+                                            'txt Section of RoomTypes
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = RoomTypeRow("RoomType_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            HotelRoomTypesTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso roomTypeIndex = filteredRowsRoomType.Count - 1 Then
+                                                HotelRoomTypesTXTFileWriter.Write(";")
+                                            Else
+                                                HotelRoomTypesTXTFileWriter.Write(",")
+                                            End If
+                                            roomTypeIndex += 1
+                                        Next
+                                    Next
+                                    filteredRowsAreaDetails = dsGtaCityCacheResponse.Tables("AreaDetails").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each AreaDetailsRow As DataRow In filteredRowsAreaDetails
+                                        filteredRowsAreaDetail = dsGtaCityCacheResponse.Tables("AreaDetail").Select(String.Format("AreaDetails_Id={0}", AreaDetailsRow("AreaDetails_Id")))
+                                        totalAreas += filteredRowsAreaDetail.Count
+                                        areaDetlsIndex = 0
+                                        For Each AreaDetailRow As DataRow In filteredRowsAreaDetail
+                                            'CSV section of AreaDetails
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = AreaDetailRow("AreaDetail_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelAreaDetailsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelAreaDetailsCsvFileWriter.Flush()
+                                            'txt Section of AreaDetails
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = AreaDetailRow("AreaDetail_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            HotelAreaDetailsTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso areaDetlsIndex = filteredRowsAreaDetail.Count - 1 Then
+                                                HotelAreaDetailsTXTFileWriter.Write(";")
+                                            Else
+                                                HotelAreaDetailsTXTFileWriter.Write(",")
+                                            End If
+                                            areaDetlsIndex += 1
+                                        Next
+                                    Next
+
+                                    filteredRowsFacilities = dsGtaCityCacheResponse.Tables("Facilities").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each FacilitiesRow As DataRow In filteredRowsFacilities
+                                        filteredRowsFacility = dsGtaCityCacheResponse.Tables("Facility").Select(String.Format("Facilities_Id={0}", FacilitiesRow("Facilities_Id")))
+                                        totalFacilities += filteredRowsFacility.Count
+                                        facilityIndex = 0
+                                        For Each FacilityRow As DataRow In filteredRowsFacility
+                                            'CSV section of Facilities
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = FacilityRow("Code")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                                csvFieldValuePrprty = FacilityRow("Facility_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelFacilitiesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelFacilitiesCsvFileWriter.Flush()
+                                            'txt Section of Facilities
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = FacilityRow("Code")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                                txtFieldValuePrprty = FacilityRow("Facility_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            HotelFacilitiesTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso facilityIndex = filteredRowsFacility.Count - 1 Then
+                                                HotelFacilitiesTXTFileWriter.Write(";")
+                                            Else
+                                                HotelFacilitiesTXTFileWriter.Write(",")
+                                            End If
+                                            facilityIndex += 1
+                                        Next
+                                    Next
+
+                                    filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                    For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                        filteredRowsLocationDetails = dsGtaCityCacheResponse.Tables("LocationDetails").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                        For Each LocationDetailsRow As DataRow In filteredRowsLocationDetails
+                                            filteredRowsLocation = dsGtaCityCacheResponse.Tables("Location").Select(String.Format("LocationDetails_Id={0}", LocationDetailsRow("LocationDetails_Id")))
+                                            totalLocations += filteredRowsLocation.Count
+                                            locationIndex = 0
+                                            For Each LocationRow As DataRow In filteredRowsLocation
+                                                'CSV section of Location
+                                                csvColumnValues.Clear()
+                                                With csvColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                    csvFieldValuePrprty = LocationRow("Code")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = LocationRow("Location_Text")
+                                                    .Append(String.Format("{0}", csvFieldValue))
+                                                End With
+                                                HotelLocationsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                                HotelLocationsCsvFileWriter.Flush()
+                                                'txt section of Location
+                                                txtColumnValues.Clear()
+                                                With txtColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                    txtFieldValuePrprty = LocationRow("Code")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = LocationRow("Location_Text")
+                                                    .Append(String.Format("{0}", txtFieldValue))
+                                                End With
+                                                HotelLocationsTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                                If htlIndex = totalHotels - 1 AndAlso locationIndex = filteredRowsLocation.Count - 1 Then
+                                                    HotelLocationsTXTFileWriter.Write(";")
+                                                Else
+                                                    HotelLocationsTXTFileWriter.Write(",")
+                                                End If
+                                                locationIndex += 1
+                                            Next
+                                        Next
+                                    Next
+
+
+                                    filteredRowsReports = dsGtaCityCacheResponse.Tables("Reports").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each ReportsRow As DataRow In filteredRowsReports
+                                        filteredRowsReport = dsGtaCityCacheResponse.Tables("Report").Select(String.Format("Reports_Id={0}", ReportsRow("Reports_Id")))
+                                        totalReports += filteredRowsReport.Count
+                                        repotDetlsIndex = 0
+                                        For Each ReportRow As DataRow In filteredRowsReport
+                                            'csv section of Report
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = ReportRow("Type")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                                csvFieldValuePrprty = ReportRow("Report_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelReportsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelReportsCsvFileWriter.Flush()
+                                            'txt section of Location
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = ReportRow("Type")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                                txtFieldValuePrprty = ReportRow("Report_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            HotelReportsTXTFileWriter.Write(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso repotDetlsIndex = filteredRowsReport.Count - 1 Then
+                                                HotelReportsTXTFileWriter.Write(";")
+                                            Else
+                                                HotelReportsTXTFileWriter.Write(",")
+                                            End If
+                                            repotDetlsIndex += 1
+                                        Next
+                                    Next
+                                    htlIndex += 1
+                                    hotelIDPkey += 1
+                                Next
+                            End If
+                        End If
+                    Catch ex As Exception
+                        LogError(ex)
+                    Finally
+                        If cityIndex < 1 Then
+                            totalRows = totalHotels + totalImages + totalAreas + totalReports + totalRoomTypes + totalFacilities + totalLocations
+                            insertQuery = String.Format("INSERT INTO gtacachestatus(Country_Code,City_ID,CityCode,TotalRows,NoOfHotels,NoOfImages,NoOfAreas,NoOfReports,NoOfRoomTypes,NoOfFacilities,NoOfLocations,ErrorMessage) VALUES ('{0}',{1},'{2}',{3},{4},{5},{6},{7},{8},{9},{10},'{11}')", countryCode, cityID, cityCode, totalRows, totalHotels, totalImages, totalAreas, totalReports, totalRoomTypes, totalFacilities, totalLocations, errorMessage.ToString())
+                            SaveToDB()
+                        End If
+
+                    End Try
+                Next
+            End Using
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+    End Sub
+
+
+
+    Private Sub GenerateTxtQueryFiles()
+        Try
+            Dim dsGTACacheResponse As DataSet = New DataSet()
+            dsGTACacheResponse.ReadXml("E:\GTACache\ConsoleApplication1\CacheResponse.xml")
+            'dsGTACacheResponse.ReadXml("E:\GTACache\ConsoleApplication1\CacheResponse111.xml")
+
+
+
+            'filteredRows
+            Dim filteredRowsItemDetail() As DataRow = Nothing
+            Dim filteredRowsItem() As DataRow = Nothing
+            Dim filteredRowsRoomTypes() As DataRow = Nothing
+            Dim filteredRowsGeoCodes() As DataRow = Nothing
+            Dim filteredRowsLinks() As DataRow = Nothing
+            Dim filteredRowsAddressLines() As DataRow = Nothing
+            Dim filteredRowsImageLinks() As DataRow = Nothing
+            Dim filteredRowsImageLink() As DataRow = Nothing
+            Dim filteredRowsRoomType() As DataRow = Nothing
+            Dim filteredRowsAreaDetails() As DataRow = Nothing
+            Dim filteredRowsAreaDetail() As DataRow = Nothing
+            Dim filteredRowsFacilities() As DataRow = Nothing
+            Dim filteredRowsFacility() As DataRow = Nothing
+            Dim filteredRowsLocationDetails() As DataRow = Nothing
+            Dim filteredRowsLocation() As DataRow = Nothing
+            Dim filteredRowsReports() As DataRow = Nothing
+            Dim filteredRowsReport() As DataRow = Nothing
+
+            Dim hotelIDPrimaryKey As UInt32 = 0
+            Dim cityID As UShort = 98
+            Dim hotelCode As String = String.Empty
+            Dim cityCode As String = "DXB"
+
+            Dim htlIndex As UShort = 0
+            Dim imgIndex As UShort = 0
+            Dim roomTypeIndex As UShort = 0
+            Dim areaDetlsIndex As UShort = 0
+            Dim facilityIndex As UShort = 0
+            Dim locationIndex As UShort = 0
+            Dim repotDetlsIndex As UShort = 0
+            Dim htlRowCount As UShort = 0
+            Dim rowCount As UShort = 0
+
+            Dim address3 As StringBuilder = New StringBuilder(String.Empty)
+
+
+
+
+
+            Dim htlDetailsRowByRowValues As StringBuilder = New StringBuilder(String.Empty)
+
+            htlRowCount = dsGTACacheResponse.Tables("HotelInformation").Rows.Count
+            For Each HotelInformationRow As DataRow In dsGTACacheResponse.Tables("HotelInformation").Rows
+                hotelIDPrimaryKey += 1
+                With htlDetailsRowByRowValues
+                    .Append(String.Format("{0},", hotelIDPrimaryKey))
+                    .Append(String.Format("{0},", cityID))
+                    .Append(String.Format("{0},", cityCode.Replace("'", "''")))
+                    filteredRowsItemDetail = dsGTACacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                    For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                        filteredRowsItem = dsGTACacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                        If filteredRowsItem.Count > 0 Then
+                            hotelCode = filteredRowsItem(0)("Code").ToString().Replace("'", "''")
+                            .Append(String.Format("{0},", hotelCode))
+                            .Append(String.Format("{0},", filteredRowsItem(0)("Item_Text").ToString().Replace("'", "''").Replace(",", ";")))
+                        Else
+                            .Append(String.Format("{0},", "\N"))
+                            .Append(String.Format("{0},", "\N"))
+                        End If
+                    Next
+                    If filteredRowsItemDetail.Count > 0 Then
+                        .Append(String.Format("{0},", filteredRowsItemDetail(0)("Copyright").ToString().Replace("'", "''").Replace(",", ";")))
+                    Else
+                        .Append(String.Format("{0},", "\N"))
+                    End If
+
+                    filteredRowsRoomTypes = dsGTACacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                    If filteredRowsRoomTypes.Count > 0 Then
+                        .Append(String.Format("{0},", IIf(IsDBNull(filteredRowsRoomTypes(0)("RoomCount")), "\N", filteredRowsRoomTypes(0)("RoomCount"))))
+                    Else
+                        .Append(String.Format("{0},", "\N"))
+                    End If
+                    filteredRowsGeoCodes = dsGTACacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                    If filteredRowsGeoCodes.Count > 0 Then
+                        .Append(String.Format("{0},", filteredRowsGeoCodes(0)("Latitude").ToString().Replace("'", "''").Replace(",", ";")))
+                        .Append(String.Format("{0},", filteredRowsGeoCodes(0)("Longitude").ToString().Replace("'", "''").Replace(",", ";")))
+                    Else
+                        .Append(String.Format("{0},", "\N"))
+                        .Append(String.Format("{0},", "\N"))
+                    End If
+
+                    .Append(String.Format("{0},", HotelInformationRow("StarRating").ToString().Replace("'", "''").Replace(",", ";")))
+                    .Append(String.Format("{0},", HotelInformationRow("Category").ToString().Replace("'", "''").Replace(",", ";")))
+                    filteredRowsLinks = dsGTACacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                    For Each LinksRow As DataRow In filteredRowsLinks
+                        filteredRowsLinks = dsGTACacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                        If filteredRowsLinks.Count > 0 Then
+                            .Append(String.Format("{0},", IIf(IsDBNull(filteredRowsLinks(0)("MapPageLink")), "\N", filteredRowsLinks(0)("MapPageLink").ToString().Replace("'", "''").Replace(",", ";"))))
+                        Else
+                            .Append(String.Format("{0},", "\N"))
+                        End If
+                    Next
+                    filteredRowsAddressLines = dsGTACacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                    If filteredRowsAddressLines.Count > 0 Then
+                        address3.Clear()
+                        .Append(String.Format("{0},", filteredRowsAddressLines(0)("AddressLine1").ToString().Replace("'", "''").Replace(",", ";")))
+                        .Append(String.Format("{0},", IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine2")), "\N", filteredRowsAddressLines(0)("AddressLine2").ToString().Replace("'", "''").Replace(",", ";"))))
+                        address3.Append(IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine3")), "\N", filteredRowsAddressLines(0)("AddressLine3").ToString().Replace("'", "''").Replace(",", ";")))
+                        If Not IsDBNull(filteredRowsAddressLines(0)("AddressLine4")) Then
+                            If filteredRowsAddressLines(0)("AddressLine4").ToString().Length > 0 Then
+                                address3.Append(String.Format(" & {0}", filteredRowsAddressLines(0)("AddressLine4").ToString().Replace("'", "''").Replace(",", ";")))
+                            End If
+                        End If
+                        .Append(String.Format("{0},", address3.ToString()))
+                        .Append(String.Format("{0},", IIf(IsDBNull(filteredRowsAddressLines(0)("Telephone")), "\N", filteredRowsAddressLines(0)("Telephone"))))
+                        .Append(String.Format("{0},", IIf(IsDBNull(filteredRowsAddressLines(0)("Fax")), "\N", filteredRowsAddressLines(0)("Fax"))))
+                        .Append(String.Format("{0}", IIf(IsDBNull(filteredRowsAddressLines(0)("WebSite")), "\N", filteredRowsAddressLines(0)("WebSite"))))
+                    End If
+                End With
+                htlDetailsRowByRowValues.AppendLine()
+            Next
+            'file.WriteAllText("E:\GTACache\htlDetailsTableData.txt", htlDetailsRowByRowValues.ToString())
+        Catch ex As Exception
+            Console.Write(ex.ToString())
+        End Try
+    End Sub
+
+    Private Function IsMandatoryTablesExists()
+        Dim isExist As Boolean = True
+        Dim tablesToCheck() As String = {"HotelInformation", "ItemDetail", "Item"}
+        Try
+            If dsGtaCacheResponse IsNot Nothing Then
+                For Each tblName As String In tablesToCheck
+                    If Not dsGtaCacheResponse.Tables.Contains(tblName) Then
+                        isExist = False
+                        Exit For
+                    End If
+                Next
+            Else
+                isExist = False
+            End If
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return isExist
+    End Function
+
+    Private Function IsMandatoryTablesExists(ByVal tblName As String) As Boolean
+        Dim isExist As Boolean = True
+        Try
+            If dsGtaCacheResponse IsNot Nothing Then
+                If Not dsGtaCacheResponse.Tables.Contains(tblName) Then
+                    isExist = False
+                End If
+            Else
+                isExist = False
+            End If
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return isExist
+    End Function
+
+    Private Sub SaveToCacheStatusTable(ByVal countryCode As String, ByVal cityID As Int32, ByVal cityCode As String)
+        Try
+            Dim totalHotels As UShort = 0
+            Dim totalImages As UShort = 0
+            Dim totalAreas As UShort = 0
+            Dim totalReports As UShort = 0
+            Dim totalRoomTypes As UShort = 0
+            Dim totalFacilities As UShort = 0
+            Dim totalLocations As UShort = 0
+            Dim totalRows As UInt32 = 0
+
+            Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+
+            Dim filteredRowsLinks() As DataRow = Nothing
+            Dim filteredRowsImageLinks() As DataRow = Nothing
+            Dim filteredRowsImageLink() As DataRow = Nothing
+            Dim filteredRowsRoomTypes() As DataRow = Nothing
+            Dim filteredRowsRoomType() As DataRow = Nothing
+            Dim filteredRowsAreaDetails() As DataRow = Nothing
+            Dim filteredRowsAreaDetail() As DataRow = Nothing
+            Dim filteredRowsFacilities() As DataRow = Nothing
+            Dim filteredRowsFacility() As DataRow = Nothing
+            Dim filteredRowsItemDetail() As DataRow = Nothing
+            Dim filteredRowsLocationDetails() As DataRow = Nothing
+            Dim filteredRowsLocation() As DataRow = Nothing
+            Dim filteredRowsReports() As DataRow = Nothing
+            Dim filteredRowsReport() As DataRow = Nothing
+
+            If String.IsNullOrEmpty(gtaServiceErrorMessage) AndAlso IsMandatoryTablesExists() Then
+                totalHotels = dsGtaCacheResponse.Tables("HotelInformation").Rows.Count
+                If IsMandatoryTablesExists("Links") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsLinks = dsGtaCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("HotelInformation_Id")))
+                        For linksIndex = 0 To filteredRowsLinks.Count - 1
+                            If IsMandatoryTablesExists("ImageLinks") Then
+                                filteredRowsImageLinks = dsGtaCacheResponse.Tables("ImageLinks").Select(String.Format("Links_Id={0}", filteredRowsLinks(linksIndex)("Links_Id")))
+                                For imageLinksIndex = 0 To filteredRowsImageLinks.Count - 1
+                                    If IsMandatoryTablesExists("ImageLink") Then
+                                        filteredRowsImageLink = dsGtaCacheResponse.Tables("ImageLink").Select(String.Format("ImageLinks_Id={0}", filteredRowsImageLinks(imageLinksIndex)("ImageLinks_Id")))
+                                        totalImages += filteredRowsImageLink.Count
+                                    End If
+                                Next
+
+
+                            End If
+                        Next
+                    Next
+
+                End If
+                If IsMandatoryTablesExists("RoomTypes") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsRoomTypes = dsGtaCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("HotelInformation_Id")))
+                        For roomTypesIndex = 0 To filteredRowsRoomTypes.Count - 1
+                            If IsMandatoryTablesExists("RoomType") Then
+                                filteredRowsRoomType = dsGtaCacheResponse.Tables("RoomType").Select(String.Format("RoomTypes_Id={0}", filteredRowsRoomTypes(roomTypesIndex)("RoomTypes_Id")))
+                                totalRoomTypes += filteredRowsRoomType.Count
+                            End If
+                        Next
+
+                    Next
+
+                End If
+
+
+                If IsMandatoryTablesExists("AreaDetails") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsAreaDetails = dsGtaCacheResponse.Tables("AreaDetails").Select(String.Format("HotelInformation_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("HotelInformation_Id")))
+                        For areaDetailsIndex = 0 To filteredRowsAreaDetails.Count - 1
+                            If IsMandatoryTablesExists("AreaDetail") Then
+                                filteredRowsAreaDetail = dsGtaCacheResponse.Tables("AreaDetail").Select(String.Format("AreaDetails_Id={0}", filteredRowsAreaDetails(areaDetailsIndex)("AreaDetails_Id")))
+                                totalAreas += filteredRowsAreaDetail.Count
+                            End If
+                        Next
+                    Next
+                End If
+
+                If IsMandatoryTablesExists("Facilities") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsFacilities = dsGtaCacheResponse.Tables("Facilities").Select(String.Format("HotelInformation_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("HotelInformation_Id")))
+                        For FacilitiesIndex = 0 To filteredRowsFacilities.Count - 1
+                            If IsMandatoryTablesExists("Facility") Then
+                                filteredRowsFacility = dsGtaCacheResponse.Tables("Facility").Select(String.Format("Facilities_Id={0}", filteredRowsFacilities(FacilitiesIndex)("Facilities_Id")))
+                                totalFacilities += filteredRowsFacility.Count
+                            End If
+                        Next
+                    Next
+                End If
+
+                If IsMandatoryTablesExists("ItemDetail") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsItemDetail = dsGtaCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("ItemDetail_Id")))
+                        For itemDetailIndex = 0 To filteredRowsItemDetail.Count - 1
+                            If IsMandatoryTablesExists("LocationDetails") Then
+                                filteredRowsLocationDetails = dsGtaCacheResponse.Tables("LocationDetails").Select(String.Format("ItemDetail_Id={0}", filteredRowsItemDetail(itemDetailIndex)("ItemDetail_Id")))
+                                For locationDetailsIndex = 0 To filteredRowsLocationDetails.Count - 1
+                                    If IsMandatoryTablesExists("Location") Then
+                                        filteredRowsLocation = dsGtaCacheResponse.Tables("Location").Select(String.Format("LocationDetails_Id={0}", filteredRowsLocationDetails(locationDetailsIndex)("LocationDetails_Id")))
+                                        totalLocations += filteredRowsLocation.Count
+                                    End If
+                                Next
+
+                            End If
+                        Next
+
+                    Next
+
+
+                End If
+               
+                If IsMandatoryTablesExists("Report") Then
+                    For htlIndex = 0 To totalHotels - 1
+                        filteredRowsReports = dsGtaCacheResponse.Tables("Reports").Select(String.Format("HotelInformation_Id={0}", dsGtaCacheResponse.Tables("HotelInformation").Rows(htlIndex)("HotelInformation_Id")))
+                        For reportsIndex = 0 To filteredRowsReports.Count - 1
+                            If IsMandatoryTablesExists("Report") Then
+                                filteredRowsReport = dsGtaCacheResponse.Tables("Report").Select(String.Format("Reports_Id={0}", filteredRowsReports(reportsIndex)("Reports_Id")))
+                                totalReports += filteredRowsReport.Count
+                            End If
+                        Next
+
+                    Next
+                End If
+            End If
+            totalRows = totalHotels + totalImages + totalAreas + totalReports + totalRoomTypes + totalFacilities + totalLocations
+            totalRecords = totalRows
+            If gtaServiceErrorMessage.Length > 0 Then
+                errorMessage.Append(gtaServiceErrorMessage)
+            ElseIf gtaServiceErrorMessage.Length = 0 AndAlso totalRows = 0 Then
+                errorMessage.Append("No data found")
+            End If
+            txtFieldValuePrprty = errorMessage.ToString()
+            insertQuery = String.Format("INSERT INTO gtacachestatus(Country_Code,City_ID,CityCode,TotalRows,NoOfHotels,NoOfImages,NoOfAreas,NoOfReports,NoOfRoomTypes,NoOfFacilities,NoOfLocations,ErrorMessage) VALUES ('{0}',{1},'{2}',{3},{4},{5},{6},{7},{8},{9},{10},{11})", countryCode, cityID, cityCode, totalRows, totalHotels, totalImages, totalAreas, totalReports, totalRoomTypes, totalFacilities, totalLocations, txtFieldValue)
+            Try
+                SaveToDB()
+            Catch mySqlError As MySqlException
+                LogError(mySqlError)
+            End Try
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+    End Sub
+
+    
+
+    Private Sub CacheCities()
+        selectQuery = "select Country_Code,City_ID,city_code from atsgen_m_gtacity order by city_ID ASC;"
+        Dim dtAllCityCodeInThisCountry As DataTable = New DataTable()
+
+
+        Dim htlIDPKey As ULong = 0
+
+        Dim countryCode As String = String.Empty
+        Dim cityCode As String = String.Empty
+        Dim cityID As UShort = 0
+
+
+        Dim htlIndex As UShort = 0
+
+
+
+        Dim queryCollection As List(Of String) = New List(Of String)
+        Dim ndxSizeCollection As List(Of Decimal) = New List(Of Decimal)
+
+        Dim cacheSystemToRun As Int16 = 0
+
+        Dim insertScript As String = String.Empty
+        Dim indexOfValueClause As Int32 = 0
+
+
+        Dim HotelInformation_Id As Int32 = 0
+        Dim htlDetailsColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlImagesColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlRoomTypesColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlAreaDetailsColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlFacilitiesColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlLocationsColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlReportDetlsColumnValues As StringBuilder = New StringBuilder(String.Empty)
+
+        Dim columnValues As String = String.Empty
+
+        Dim totalHotels As UShort = 0
+        Dim noOfCachedCities As UInt16 = 0
+
+
+        Try
+            'Create ErrorLog file if not exist
+            If Not System.IO.File.Exists(errorLogPath) Then
+                Using fs = System.IO.File.Create(errorLogPath)
+
+                End Using
+            End If
+
+            'Clear ErrorLog file
+            'Using ErrorLog = New FileStream(errorLogPath, FileMode.Truncate)
+
+            'End Using
+
+            selectQuery = "select Country_Code,Country_Name from atsgen_m_gtacountry;"
+            Dim dtCountryCode As DataTable = ReadFromDB()
+            Console.WriteLine("Do not close the application; bcoz GTA caching In Progress...")
+            'For countryIndex = 0 To 0
+            For countryIndex = 0 To dtCountryCode.Rows.Count - 1
+                noOfCachedCities = 0
+                dtAllCityCodeInThisCountry.Reset()
+                selectQuery = String.Format("select City_ID,city_code from atsgen_m_gtacity where Country_Code='{0}'", dtCountryCode.Rows(countryIndex)("Country_Code"))
+                dtAllCityCodeInThisCountry.Reset()
+                dtAllCityCodeInThisCountry = ReadFromDB()
+                'For cityIndex = 0 To 2
+                For cityIndex = 0 To dtAllCityCodeInThisCountry.Rows.Count - 1
+                    selectQuery = String.Format("select count(*) from gtacachestatus where City_ID ={0}", dtAllCityCodeInThisCountry.Rows(cityIndex)("City_ID"))
+                    If ReadCount() = 0 Then
+                        selectQuery = "select EnableCache from gtacachesystemsettings;"
+                        cacheSystemToRun = ReadCount()
+                        'If cacheSystemToRun = 1 And dtAllCityCodeInThisCountry.Rows(cityIndex)("city_code") = "DXB" Then
+                        If cacheSystemToRun = 1 Then
+                            queryCollection.Clear()
+
+                            'Reset the columnScript values
+                            htlDetailsColumnValues.Clear()
+                            htlImagesColumnValues.Clear()
+                            htlRoomTypesColumnValues.Clear()
+                            htlAreaDetailsColumnValues.Clear()
+                            htlFacilitiesColumnValues.Clear()
+                            htlLocationsColumnValues.Clear()
+                            htlReportDetlsColumnValues.Clear()
+
+                            'Reset the counts at each Each City
+
+
+
+                            countryCode = dtCountryCode.Rows(countryIndex)("Country_Code")
+                            cityCode = dtAllCityCodeInThisCountry.Rows(cityIndex)("city_code")
+                            cityID = dtAllCityCodeInThisCountry.Rows(cityIndex)("City_ID")
+                            Try
+
+                                htlIndex = 0
+                                htlIDPKey = dtAllCityCodeInThisCountry.Rows(cityIndex)("City_ID") * 10000
+                                GenerateCityCacheRequest(dtAllCityCodeInThisCountry.Rows(cityIndex)("city_code"))
+
+
+                                GTAServiceCall()
+
+                                'gtaServiceResponse = File.ReadAllText("E:\GTACache\ConsoleApplication1\CacheResponse.xml")
+                                'dsGtaCacheResponse.Reset()
+                                'dsGtaCacheResponse.ReadXml(New StringReader(gtaServiceResponse))
+
+                                SaveToCacheStatusTable(countryCode, cityID, cityCode)
+
+
+                                If String.IsNullOrEmpty(gtaServiceErrorMessage) AndAlso IsMandatoryTablesExists() Then
+                                    If totalRecords > 0 Then
+                                        noOfCachedCities += 1
+                                    End If
+
+                                    totalHotels = dsGtaCacheResponse.Tables("HotelInformation").Rows.Count
+                                    For hotelRowIndex = 0 To dsGtaCacheResponse.Tables("HotelInformation").Rows.Count - 1
+                                        HotelInformation_Id = dsGtaCacheResponse.Tables("HotelInformation").Rows(hotelRowIndex)("HotelInformation_Id")
+
+                                        columnValues = HotelDetailsValues(HotelInformation_Id, htlIDPKey, cityID, cityCode)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlDetailsColumnValues.Length > 0 Then
+                                                htlDetailsColumnValues.Append(",")
+                                            End If
+                                            htlDetailsColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlDetailsColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtahoteldetails (Hotel_ID,City_Id,CityCode,HotelCode,HotelName,Copyright,TotalRooms,Latitude,Longitude,StarRating,Category,MapPageLink,Address1,Address2,Address3,Telephone,Fax,Website) VALUES {0};", htlDetailsColumnValues.ToString()))
+                                        End If
+
+
+                                        columnValues = HotelImagesValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlImagesColumnValues.Length > 0 Then
+                                                htlImagesColumnValues.Append(",")
+                                            End If
+                                            htlImagesColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlImagesColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtahotelimages (Hotel_ID,ItemCode,ImageLink,ThumbNail,ImageDetails,Height,Width) VALUES {0};", htlImagesColumnValues.ToString()))
+                                        End If
+
+
+
+                                        columnValues = HotelRoomTypeValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlRoomTypesColumnValues.Length > 0 Then
+                                                htlRoomTypesColumnValues.Append(",")
+                                            End If
+                                            htlRoomTypesColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlRoomTypesColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtaroomtypes (Hotel_ID,ItemCode,RoomTypes) VALUES {0};", htlRoomTypesColumnValues.ToString()))
+                                        End If
+
+
+                                        columnValues = HotelAreaDetlsValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlAreaDetailsColumnValues.Length > 0 Then
+                                                htlAreaDetailsColumnValues.Append(",")
+                                            End If
+                                            htlAreaDetailsColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlAreaDetailsColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtaareadetails (Hotel_ID,ItemCode,AreaDetails) VALUES {0};", htlAreaDetailsColumnValues.ToString()))
+                                        End If
+
+
+                                        columnValues = HotelFacilityValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlFacilitiesColumnValues.Length > 0 Then
+                                                htlFacilitiesColumnValues.Append(",")
+                                            End If
+                                            htlFacilitiesColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlFacilitiesColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtafecilitydetails (Hotel_ID,ItemCode,FecilityCode,FecilityDetails) VALUES {0};", htlFacilitiesColumnValues.ToString()))
+                                        End If
+
+
+                                        columnValues = HotelLocationsValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlLocationsColumnValues.Length > 0 Then
+                                                htlLocationsColumnValues.Append(",")
+                                            End If
+                                            htlLocationsColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlLocationsColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtalocationdetails (Hotel_ID,ItemCode,LocationCode,LocationName) VALUES {0};", htlLocationsColumnValues.ToString()))
+                                        End If
+
+
+                                        columnValues = HotelReportsValues(HotelInformation_Id, htlIDPKey)
+                                        If Not String.IsNullOrEmpty(columnValues) Then
+                                            If htlReportDetlsColumnValues.Length > 0 Then
+                                                htlReportDetlsColumnValues.Append(",")
+                                            End If
+                                            htlReportDetlsColumnValues.Append(columnValues)
+                                        End If
+                                        If htlIndex = totalHotels - 1 AndAlso htlReportDetlsColumnValues.Length > 0 Then
+                                            queryCollection.Add(String.Format("INSERT INTO atsgen_m_gtareportdetails (Hotel_ID,ItemCode,Type,ReportDetails) VALUES {0};", htlReportDetlsColumnValues.ToString()))
+                                        End If
+
+                                        htlIndex += 1
+                                        htlIDPKey += 1
+                                    Next
+                                    Try
+                                        'Bulk insertion using Multiple row inserts
+                                        SaveToDB(queryCollection)
+
+                                        
+                                    Catch mySqlError As MySqlException
+                                        Console.WriteLine(String.Format("An Error occured for the City: {0}, ErrorDecription: {1}", cityCode, mySqlError.Message))
+                                        Console.WriteLine("Press any key to continue caching or enter N to stop caching.")
+                                        Dim key = Console.Read()
+                                        If Convert.ToChar(key).ToString().ToUpper() = "N" Then
+                                            Exit Sub
+                                        End If
+                                        LogError(mySqlError)
+                                    End Try
+                                End If
+                                If cityIndex = dtAllCityCodeInThisCountry.Rows.Count - 1 Then
+                                    'Save the Index size of tables to DB per country(Save occurs at each countrys last city). 
+                                    Console.WriteLine(String.Format("Cached the Country {0}:{1}, Total/Cached: {2}/{3}", dtCountryCode.Rows(countryIndex)("Country_Code"), dtCountryCode.Rows(countryIndex)("Country_Name"), dtAllCityCodeInThisCountry.Rows.Count, noOfCachedCities))
+
+
+                                    'Get the Index Size of tables & Save the Ndex sizes. 
+                                    ndxSizeCollection = GetNdxSizes()
+                                    insertQuery = String.Format("INSERT INTO gtacachendxsize (Country_Code,City_ID,CityCode,TotalNdxInMB,HtlDetailsNdxInMB,HtlImagesNdxInMB,HtlRoomTypesNdxInMB,HtlAreaDtlsNdxInMB,HtlFacilitiesNdxInMB,HtlLocationsNdxInMB,HtlReportsNdxInMB) VALUES ('{0}',{1},'{2}',{3},{4},{5},{6},{7},{8},{9},{10})", countryCode, cityID, cityCode, ndxSizeCollection.Sum(), ndxSizeCollection(0), ndxSizeCollection(1), ndxSizeCollection(2), ndxSizeCollection(3), ndxSizeCollection(4), ndxSizeCollection(5), ndxSizeCollection(6))
+                                    Try
+                                        SaveToDB()
+                                    Catch mySqlError As MySqlException
+                                        LogError(mySqlError)
+                                    End Try
+                                End If
+
+
+                            Catch ex As Exception
+                                LogError(ex)
+                            End Try
+                        ElseIf cacheSystemToRun = 0 Then
+                            Console.WriteLine("Caching is disabled.")
+                            Exit Sub
+                        End If
+
+                    End If
+
+                 
+                Next
+
+                
+            Next
+            Console.WriteLine("GTA caching completed.")
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+    End Sub
+    
+    Private Function HotelDetailsValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32, ByVal cityID As Int32, ByVal cityCode As String) As String
+
+        Dim filteredRowsItemDetail() As DataRow = Nothing
+        Dim filteredRowsItem() As DataRow = Nothing
+        Dim filteredRowsRoomTypes() As DataRow = Nothing
+        Dim filteredRowsGeoCodes() As DataRow = Nothing
+        Dim filteredRowsLinks() As DataRow = Nothing
+        Dim filteredRowsAddressLines() As DataRow = Nothing
+        Dim address3And4 As StringBuilder = New StringBuilder(String.Empty)
+        Dim htlColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+        Try
+
+            Dim HotelInformationRows() As DataRow = dsGtaCacheResponse.Tables("HotelInformation").Select(String.Format("HotelInformation_Id='{0}'", HotelInformation_Id))
+            If HotelInformationRows.Count <> 0 Then
+                htlColumnValues.Clear()
+                With htlColumnValues
+                    .Append(String.Format("{0},", htlIDPkey))
+                    .Append(String.Format("{0},", cityID))
+                    txtFieldValuePrprty = cityCode
+                    .Append(String.Format("{0},", txtFieldValue))
+                    filteredRowsItemDetail = dsGtaCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformation_Id))
+                    For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                        filteredRowsItem = dsGtaCacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                        If filteredRowsItem.Count > 0 Then
+                            txtFieldValuePrprty = getColumnValue(filteredRowsItem(0), "Code")
+                            htlCode = txtFieldValue
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsItem(0), "Item_Text")
+                            .Append(String.Format("{0},", txtFieldValue))
+                        End If
+                    Next
+                    If filteredRowsItemDetail.Count > 0 Then
+                        txtFieldValuePrprty = getColumnValue(filteredRowsItemDetail(0), "Copyright")
+                        .Append(String.Format("{0},", txtFieldValue))
+                    Else
+                        txtFieldValuePrprty = String.Empty
+                        .Append(String.Format("{0},", txtFieldValue))
+                    End If
+                    If IsMandatoryTablesExists("RoomTypes") Then
+                        filteredRowsRoomTypes = dsGtaCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                        If filteredRowsRoomTypes.Count > 0 Then
+                            txtFieldValuePrprty = getColumnValue(filteredRowsRoomTypes(0), "RoomCount")
+                            .Append(String.Format("{0},", txtFieldValue))
+                        Else
+                            txtFieldValuePrprty = String.Empty
+                            .Append(String.Format("{0},", txtFieldValue))
+                        End If
+                    Else
+                        txtFieldValuePrprty = String.Empty
+                        .Append(String.Format("{0},", txtFieldValue))
+                    End If
+                    If IsMandatoryTablesExists("GeoCodes") Then
+                        filteredRowsGeoCodes = dsGtaCacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                        If filteredRowsGeoCodes.Count > 0 Then
+                            txtFieldValuePrprty = getColumnValue(filteredRowsGeoCodes(0), "Latitude")
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsGeoCodes(0), "Longitude")
+                            .Append(String.Format("{0},", txtFieldValue))
+                        Else
+                            txtFieldValuePrprty = String.Empty
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0},", txtFieldValue))
+                        End If
+                    Else
+                        txtFieldValuePrprty = String.Empty
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0},", txtFieldValue))
+                    End If
+                    
+                    txtFieldValuePrprty = getColumnValue(HotelInformationRows(0), "StarRating")
+                    .Append(String.Format("{0},", txtFieldValue))
+                    txtFieldValuePrprty = getColumnValue(HotelInformationRows(0), "Category")
+                    .Append(String.Format("{0},", txtFieldValue))
+                    If IsMandatoryTablesExists("Links") Then
+                        filteredRowsLinks = dsGtaCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                        If filteredRowsLinks.Count > 0 Then
+                            For Each LinksRow As DataRow In filteredRowsLinks
+                                If IsMandatoryTablesExists("MapLinks") Then
+                                    filteredRowsLinks = dsGtaCacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                    If filteredRowsLinks.Count > 0 Then
+                                        txtFieldValuePrprty = getColumnValue(filteredRowsLinks(0), "MapPageLink")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                    Else
+                                        txtFieldValuePrprty = String.Empty
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                    End If
+                                Else
+                                    txtFieldValuePrprty = String.Empty
+                                    .Append(String.Format("{0},", txtFieldValue))
+                                End If
+
+                            Next
+                        Else
+                            txtFieldValuePrprty = String.Empty
+                            .Append(String.Format("{0},", txtFieldValue))
+                        End If
+                    Else
+                        txtFieldValuePrprty = String.Empty
+                        .Append(String.Format("{0},", txtFieldValue))
+                    End If
+
+                    If IsMandatoryTablesExists("AddressLines") Then
+                        filteredRowsAddressLines = dsGtaCacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                        If filteredRowsAddressLines.Count > 0 Then
+                            txtFieldValuePrprty = getColumnValue(filteredRowsAddressLines(0), "AddressLine1")
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsAddressLines(0), "AddressLine2")
+                            .Append(String.Format("{0},", txtFieldValue))
+                            address3And4.Clear()
+                            address3And4.Append(getColumnValue(filteredRowsAddressLines(0), "AddressLine3"))
+                            If getColumnValue(filteredRowsAddressLines(0), "AddressLine4").Length > 0 Then
+                                address3And4.Append(",")
+                                address3And4.Append(getColumnValue(filteredRowsAddressLines(0), "AddressLine4"))
+                            End If
+                            txtFieldValuePrprty = address3And4.ToString()
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsAddressLines(0), "Telephone")
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsAddressLines(0), "Fax")
+                            .Append(String.Format("{0},", txtFieldValue))
+                            txtFieldValuePrprty = getColumnValue(filteredRowsAddressLines(0), "WebSite")
+                            .Append(String.Format("{0}", txtFieldValue))
+                        Else
+                            txtFieldValuePrprty = String.Empty
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0},", txtFieldValue))
+                            .Append(String.Format("{0}", txtFieldValue))
+                        End If
+                    Else
+                        txtFieldValuePrprty = String.Empty
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0},", txtFieldValue))
+                        .Append(String.Format("{0}", txtFieldValue))
+                    End If
+
+                End With
+                columnValues.Append(String.Format("({0})", htlColumnValues.ToString()))
+               
+            End If
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+
+    Private Function HotelImagesValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+
+
+        Dim filteredRowsLinks() As DataRow = Nothing
+        Dim filteredRowsImageLinks() As DataRow = Nothing
+        Dim filteredRowsImageLink() As DataRow = Nothing
+        Dim imgIndex As UShort = 0
+        Dim imgColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+
+        Try
+            If IsMandatoryTablesExists("Links") Then
+                filteredRowsLinks = dsGtaCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                For Each LinksRow As DataRow In filteredRowsLinks
+                    If IsMandatoryTablesExists("ImageLinks") Then
+                        filteredRowsImageLinks = dsGtaCacheResponse.Tables("ImageLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                        For Each ImageLinksRow As DataRow In filteredRowsImageLinks
+                            If IsMandatoryTablesExists("ImageLink") Then
+                                filteredRowsImageLink = dsGtaCacheResponse.Tables("ImageLink").Select(String.Format("ImageLinks_Id={0}", ImageLinksRow("ImageLinks_Id")))
+                                imgIndex = 0
+                                For Each ImageLinkRow As DataRow In filteredRowsImageLink
+                                    imgColumnValues.Clear()
+                                    With imgColumnValues
+                                        .Append(String.Format("{0},", htlIDPkey))
+                                        .Append(String.Format("{0},", htlCode))
+                                        txtFieldValuePrprty = getColumnValue(ImageLinkRow, "Image")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = getColumnValue(ImageLinkRow, "ThumbNail")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = getColumnValue(ImageLinkRow, "Text")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = getColumnValue(ImageLinkRow, "Height")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = getColumnValue(ImageLinkRow, "Width")
+                                        .Append(String.Format("{0}", txtFieldValue))
+                                    End With
+                                    columnValues.Append(String.Format("({0})", imgColumnValues.ToString()))
+                                    If imgIndex <> filteredRowsImageLink.Count - 1 Then
+                                        columnValues.Append(",")
+                                    End If
+                                    imgIndex += 1
+                                Next
+                            End If
+
+                        Next
+                    End If
+
+                Next
+            End If
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+
+    Private Function HotelRoomTypeValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+
+        Dim filteredRowsRoomTypes() As DataRow = Nothing
+        Dim filteredRowsRoomType() As DataRow = Nothing
+        Dim roomTypeIndex As UShort = 0
+        Dim roomTypeColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+
+        Try
+            If IsMandatoryTablesExists("RoomTypes") Then
+                filteredRowsRoomTypes = dsGtaCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                For Each RoomTypesRow As DataRow In filteredRowsRoomTypes
+                    If IsMandatoryTablesExists("RoomType") Then
+                        filteredRowsRoomType = dsGtaCacheResponse.Tables("RoomType").Select(String.Format("RoomTypes_Id={0}", RoomTypesRow("RoomTypes_Id")))
+                        roomTypeIndex = 0
+                        For Each RoomTypeRow As DataRow In filteredRowsRoomType
+                            roomTypeColumnValues.Clear()
+                            With roomTypeColumnValues
+                                .Append(String.Format("{0},", htlIDPkey))
+                                .Append(String.Format("{0},", htlCode))
+                                txtFieldValuePrprty = getColumnValue(RoomTypeRow, "RoomType_Text")
+                                .Append(String.Format("{0}", txtFieldValue))
+                            End With
+                            columnValues.Append(String.Format("({0})", roomTypeColumnValues.ToString()))
+                            If roomTypeIndex <> filteredRowsRoomType.Count - 1 Then
+                                columnValues.Append(",")
+                            End If
+                            roomTypeIndex += 1
+                        Next
+                    End If
+
+                Next
+            End If
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+
+    Private Function HotelAreaDetlsValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+
+        Dim filteredRowsAreaDetails() As DataRow = Nothing
+        Dim filteredRowsAreaDetail() As DataRow = Nothing
+        Dim areaDetlsIndex As UShort = 0
+        Dim areaDetlColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            If IsMandatoryTablesExists("AreaDetails") Then
+                filteredRowsAreaDetails = dsGtaCacheResponse.Tables("AreaDetails").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                For Each AreaDetailsRow As DataRow In filteredRowsAreaDetails
+                    If IsMandatoryTablesExists("AreaDetail") Then
+                        filteredRowsAreaDetail = dsGtaCacheResponse.Tables("AreaDetail").Select(String.Format("AreaDetails_Id={0}", AreaDetailsRow("AreaDetails_Id")))
+                        areaDetlsIndex = 0
+                        For Each AreaDetailRow As DataRow In filteredRowsAreaDetail
+                            areaDetlColumnValues.Clear()
+                            With areaDetlColumnValues
+                                .Append(String.Format("{0},", htlIDPkey))
+                                .Append(String.Format("{0},", htlCode))
+                                txtFieldValuePrprty = getColumnValue(AreaDetailRow, "AreaDetail_Text")
+                                .Append(String.Format("{0}", txtFieldValue))
+                            End With
+                            columnValues.Append(String.Format("({0})", areaDetlColumnValues.ToString()))
+                            If areaDetlsIndex <> filteredRowsAreaDetail.Count - 1 Then
+                                columnValues.Append(",")
+                            End If
+                            areaDetlsIndex += 1
+                        Next
+                    End If
+
+                Next
+            End If
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+    Private Function HotelFacilityValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+
+        Dim filteredRowsFacilities() As DataRow = Nothing
+        Dim filteredRowsFacility() As DataRow = Nothing
+        Dim facilityIndex As UShort = 0
+        Dim facilityColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            If IsMandatoryTablesExists("Facilities") Then
+                filteredRowsFacilities = dsGtaCacheResponse.Tables("Facilities").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                For Each FacilitiesRow As DataRow In filteredRowsFacilities
+                    If IsMandatoryTablesExists("Facility") Then
+                        filteredRowsFacility = dsGtaCacheResponse.Tables("Facility").Select(String.Format("Facilities_Id={0}", FacilitiesRow("Facilities_Id")))
+                        facilityIndex = 0
+                        For Each FacilityRow As DataRow In filteredRowsFacility
+                            facilityColumnValues.Clear()
+                            With facilityColumnValues
+                                .Append(String.Format("{0},", htlIDPkey))
+                                .Append(String.Format("{0},", htlCode))
+                                txtFieldValuePrprty = getColumnValue(FacilityRow, "Code")
+                                .Append(String.Format("{0},", txtFieldValue))
+                                txtFieldValuePrprty = getColumnValue(FacilityRow, "Facility_Text")
+                                .Append(String.Format("{0}", txtFieldValue))
+                            End With
+                            columnValues.Append(String.Format("({0})", facilityColumnValues.ToString()))
+                            If facilityIndex <> filteredRowsFacility.Count - 1 Then
+                                columnValues.Append(",")
+                            End If
+                            facilityIndex += 1
+                        Next
+                    End If
+
+                Next
+            End If
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+    Private Function HotelLocationsValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+
+        Dim filteredRowsItemDetail() As DataRow = Nothing
+        Dim filteredRowsLocationDetails() As DataRow = Nothing
+        Dim filteredRowsLocation() As DataRow = Nothing
+        Dim locationIndex As UShort = 0
+        Dim locColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            If IsMandatoryTablesExists("ItemDetail") Then
+                filteredRowsItemDetail = dsGtaCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformation_Id))
+                For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                    If IsMandatoryTablesExists("LocationDetails") Then
+                        filteredRowsLocationDetails = dsGtaCacheResponse.Tables("LocationDetails").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                        For Each LocationDetailsRow As DataRow In filteredRowsLocationDetails
+                            If IsMandatoryTablesExists("Location") Then
+                                filteredRowsLocation = dsGtaCacheResponse.Tables("Location").Select(String.Format("LocationDetails_Id={0}", LocationDetailsRow("LocationDetails_Id")))
+                                locationIndex = 0
+                                For Each LocationRow As DataRow In filteredRowsLocation
+                                    locColumnValues.Clear()
+                                    With locColumnValues
+                                        .Append(String.Format("{0},", htlIDPkey))
+                                        .Append(String.Format("{0},", htlCode))
+                                        txtFieldValuePrprty = getColumnValue(LocationRow, "Code")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = getColumnValue(LocationRow, "Location_Text")
+                                        .Append(String.Format("{0}", txtFieldValue))
+                                    End With
+                                    columnValues.Append(String.Format("({0})", locColumnValues.ToString()))
+                                    If locationIndex <> filteredRowsLocation.Count - 1 Then
+                                        columnValues.Append(",")
+                                    End If
+                                    locationIndex += 1
+                                Next
+                            End If
+                        Next
+                    End If
+                Next
+            End If
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+    Private Function HotelReportsValues(ByVal HotelInformation_Id As Int32, ByVal htlIDPkey As Int32) As String
+        Dim filteredRowsReports() As DataRow = Nothing
+        Dim filteredRowsReport() As DataRow = Nothing
+        Dim repotDetlsIndex As UShort = 0
+        Dim reportColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim columnValues As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            If IsMandatoryTablesExists("Reports") Then
+                filteredRowsReports = dsGtaCacheResponse.Tables("Reports").Select(String.Format("HotelInformation_Id={0}", HotelInformation_Id))
+                For Each ReportsRow As DataRow In filteredRowsReports
+                    If IsMandatoryTablesExists("Report") Then
+                        filteredRowsReport = dsGtaCacheResponse.Tables("Report").Select(String.Format("Reports_Id={0}", ReportsRow("Reports_Id")))
+                        repotDetlsIndex = 0
+                        For Each ReportRow As DataRow In filteredRowsReport
+                            reportColumnValues.Clear()
+                            With reportColumnValues
+                                .Append(String.Format("{0},", htlIDPkey))
+                                .Append(String.Format("{0},", htlCode))
+                                txtFieldValuePrprty = getColumnValue(ReportRow, "Type")
+                                .Append(String.Format("{0},", txtFieldValue))
+                                txtFieldValuePrprty = getColumnValue(ReportRow, "Report_Text")
+                                .Append(String.Format("{0}", txtFieldValue))
+                            End With
+                            columnValues.Append(String.Format("({0})", reportColumnValues.ToString()))
+                            If repotDetlsIndex <> filteredRowsReport.Count - 1 Then
+                                columnValues.Append(",")
+                            End If
+                            repotDetlsIndex += 1
+                        Next
+                    End If
+
+                Next
+            End If
+
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+        Return columnValues.ToString()
+    End Function
+
+    Private Sub GenerateCacheDataForAllCitiesWriteToFiles()
+        selectQuery = "select Country_Code,City_ID,city_code from atsgen_m_gtacity order by city_ID ASC;"
+        Dim dtCityCodeList As DataTable = ReadFromDB()
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Dim dsGtaCityCacheResponse As DataSet = New DataSet()
+
+
+        Dim csvColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim txtColumnValues As StringBuilder = New StringBuilder(String.Empty)
+
+
+        Dim hotelIDPkey As ULong = 0
+        Dim hotelCodeCsvFormat As String = String.Empty
+        Dim hotelCodeMultipleRowFormat As String = String.Empty
+
+
+        '''''''''filteredRows'''''''''''
+        Dim filteredRowsItemDetail() As DataRow = Nothing
+        Dim filteredRowsItem() As DataRow = Nothing
+        Dim filteredRowsRoomTypes() As DataRow = Nothing
+        Dim filteredRowsGeoCodes() As DataRow = Nothing
+        Dim filteredRowsLinks() As DataRow = Nothing
+        Dim filteredRowsAddressLines() As DataRow = Nothing
+        Dim filteredRowsImageLinks() As DataRow = Nothing
+        Dim filteredRowsImageLink() As DataRow = Nothing
+        Dim filteredRowsRoomType() As DataRow = Nothing
+        Dim filteredRowsAreaDetails() As DataRow = Nothing
+        Dim filteredRowsAreaDetail() As DataRow = Nothing
+        Dim filteredRowsFacilities() As DataRow = Nothing
+        Dim filteredRowsFacility() As DataRow = Nothing
+        Dim filteredRowsLocationDetails() As DataRow = Nothing
+        Dim filteredRowsLocation() As DataRow = Nothing
+        Dim filteredRowsReports() As DataRow = Nothing
+        Dim filteredRowsReport() As DataRow = Nothing
+
+        Dim address3And4 As StringBuilder = New StringBuilder(String.Empty)
+
+
+
+        Dim countryCode As String = String.Empty
+        Dim cityCode As String = String.Empty
+        Dim cityID As UShort = 0
+        Dim totalRows As UInt32 = 0
+
+
+
+        Dim htlIndex As UShort = 0
+        Dim imgIndex As UShort = 0
+        Dim roomTypeIndex As UShort = 0
+        Dim areaDetlsIndex As UShort = 0
+        Dim facilityIndex As UShort = 0
+        Dim locationIndex As UShort = 0
+        Dim repotDetlsIndex As UShort = 0
+
+
+        Dim totalHotels As UShort = 0
+        Dim totalImages As UShort = 0
+        Dim totalAreas As UShort = 0
+        Dim totalReports As UShort = 0
+        Dim totalRoomTypes As UShort = 0
+        Dim totalFacilities As UShort = 0
+        Dim totalLocations As UShort = 0
+
+        Dim fileNames() As String = {"HotelDetails", "HotelImages", "HotelRoomTypes", "HotelAreaDetails", "HotelFacilities", "HotelLocations", "HotelReports"}
+        Dim fullPath As String = String.Empty
+
+
+        Dim insertToHtlDetails As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToHtlImages As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToRoomTypes As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToAreaDetails As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToFacilities As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToLocationDetls As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertToReportDetls As StringBuilder = New StringBuilder(String.Empty)
+
+        Dim queryCollection As List(Of String) = New List(Of String)
+        Dim ndxSizeCollection As List(Of Decimal) = New List(Of Decimal)
+        Try
+            'Create  CSV files if not exist
+            For Each file As String In fileNames
+                fullPath = csvFilePath + "\" + file + ".csv"
+                If Not System.IO.File.Exists(fullPath) Then
+                    Using fs = System.IO.File.Create(fullPath)
+
+                    End Using
+                End If
+            Next
+
+            'Create ErrorLog file if not exist
+            If Not System.IO.File.Exists(errorLogPath) Then
+                Using fs = System.IO.File.Create(errorLogPath)
+
+                End Using
+            End If
+
+            'Clear ErrorLog file
+            Using ErrorLog = New FileStream(errorLogPath, FileMode.Truncate)
+
+            End Using
+
+
+            'Clear All CSV files
+            Using htlDetailFile = New FileStream(csvFilePath + "\HotelDetails.csv", FileMode.Truncate), htlImagesFile = New FileStream(csvFilePath + "\HotelImages.csv", FileMode.Truncate), htlRoomTypesFile = New FileStream(csvFilePath + "\HotelRoomTypes.csv", FileMode.Truncate), htlAreaDetlsFile = New FileStream(csvFilePath + "\HotelAreaDetails.csv", FileMode.Truncate), htlFacilitiesFile = New FileStream(csvFilePath + "\HotelFacilities.csv", FileMode.Truncate), htlLocationsFile = New FileStream(csvFilePath + "\HotelLocations.csv", FileMode.Truncate), htlReportsFile = New FileStream(csvFilePath + "\HotelReports.csv", FileMode.Truncate)
+
+            End Using
+
+
+
+
+            'Write to files
+            Using hotelDetailsCSVFileWriter = New StreamWriter(csvFilePath + "\HotelDetails.csv", True), hotelImagesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelImages.csv", True), HotelRoomTypesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelRoomTypes.csv", True), HotelAreaDetailsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelAreaDetails.csv", True), HotelFacilitiesCsvFileWriter = New StreamWriter(csvFilePath + "\HotelFacilities.csv", True), HotelLocationsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelLocations.csv", True), HotelReportsCsvFileWriter = New StreamWriter(csvFilePath + "\HotelReports.csv", True)
+
+
+
+
+
+
+                For cityIndex = 0 To dtCityCodeList.Rows.Count - 1
+                    selectQuery = String.Format("select count(*) from gtacachestatus where City_ID ={0}", dtCityCodeList.Rows(cityIndex)("City_ID"))
+                    If ReadCount() = 0 Then
+                        errorMessage.Clear()
+                        insertToHtlDetails.Clear()
+                        insertToHtlImages.Clear()
+                        insertToRoomTypes.Clear()
+                        insertToAreaDetails.Clear()
+                        insertToFacilities.Clear()
+                        insertToLocationDetls.Clear()
+                        insertToReportDetls.Clear()
+
+
+                        insertToHtlDetails.Append("INSERT INTO atsgen_m_gtahoteldetails (Hotel_ID,City_Id,CityCode,HotelCode,HotelName,Copyright,TotalRooms,Latitude,Longitude,StarRating,Category,MapPageLink,Address1,Address2,Address3,Telephone,Fax,Website) VALUES ")
+                        insertToHtlImages.Append("INSERT INTO atsgen_m_gtahotelimages (Hotel_ID,ItemCode,ImageLink,ThumbNail,ImageDetails,Height,Width) VALUES ")
+                        insertToRoomTypes.Append("INSERT INTO atsgen_m_gtaroomtypes (Hotel_ID,ItemCode,RoomTypes) VALUES ")
+                        insertToAreaDetails.Append("INSERT INTO atsgen_m_gtaareadetails (Hotel_ID,ItemCode,AreaDetails) VALUES ")
+                        insertToFacilities.Append("INSERT INTO atsgen_m_gtafecilitydetails (Hotel_ID,ItemCode,FecilityCode,FecilityDetails) VALUES ")
+                        insertToLocationDetls.Append("INSERT INTO atsgen_m_gtalocationdetails (Hotel_ID,ItemCode,LocationCode,LocationName) VALUES ")
+                        insertToReportDetls.Append("INSERT INTO atsgen_m_gtareportdetails (Hotel_ID,ItemCode,Type,ReportDetails) VALUES ")
+
+
+
+                        totalHotels = 0
+                        totalImages = 0
+                        totalAreas = 0
+                        totalReports = 0
+                        totalRoomTypes = 0
+                        totalFacilities = 0
+                        totalLocations = 0
+
+
+                        countryCode = dtCityCodeList.Rows(cityIndex)("Country_Code")
+                        cityCode = dtCityCodeList.Rows(cityIndex)("city_code")
+                        cityID = dtCityCodeList.Rows(cityIndex)("City_ID")
+                        Try
+
+                            htlIndex = 0
+                            hotelIDPkey = dtCityCodeList.Rows(cityIndex)("City_ID") * 10000
+                            GenerateCityCacheRequest(dtCityCodeList.Rows(cityIndex)("city_code"))
+                            GTAServiceCall()
+
+                            'gtaServiceResponse = File.ReadAllText("E:\GTACache\ConsoleApplication1\CacheResponse.xml")
+
+                            errorMessage.Append(gtaServiceErrorMessage)
+                            If Not String.IsNullOrEmpty(gtaServiceResponse) AndAlso String.IsNullOrEmpty(gtaServiceErrorMessage) Then
+                                dsGtaCityCacheResponse.Reset()
+                                dsGtaCityCacheResponse.ReadXml(New StringReader(gtaServiceResponse))
+                                For Each HotelInformationRow As DataRow In dsGtaCityCacheResponse.Tables("HotelInformation").Rows
+                                    totalHotels = dsGtaCityCacheResponse.Tables("HotelInformation").Rows.Count
+
+
+                                    'CSV section of HotelDetails
+                                    csvColumnValues.Clear()
+                                    With csvColumnValues
+                                        .Append(String.Format("{0},", hotelIDPkey))
+                                        .Append(String.Format("{0},", dtCityCodeList.Rows(cityIndex)("City_ID")))
+                                        csvFieldValuePrprty = dtCityCodeList.Rows(cityIndex)("city_code")
+                                        .Append(String.Format("{0},", csvFieldValue))
+                                        filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                        For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                            filteredRowsItem = dsGtaCityCacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                            If filteredRowsItem.Count > 0 Then
+                                                csvFieldValuePrprty = filteredRowsItem(0)("Code")
+                                                hotelCodeCsvFormat = csvFieldValue
+                                                txtFieldValuePrprty = filteredRowsItem(0)("Code")
+                                                hotelCodeMultipleRowFormat = txtFieldValue
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = filteredRowsItem(0)("Item_Text")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End If
+                                        Next
+                                        If filteredRowsItemDetail.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsItemDetail(0)("Copyright")), String.Empty, filteredRowsItemDetail(0)("Copyright"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsRoomTypes.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsRoomTypes(0)("RoomCount")), String.Empty, filteredRowsRoomTypes(0)("RoomCount"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        filteredRowsGeoCodes = dsGtaCityCacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsGeoCodes.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Latitude")), String.Empty, filteredRowsGeoCodes(0)("Latitude"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Longitude")), String.Empty, filteredRowsGeoCodes(0)("Longitude"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                        csvFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("StarRating")), String.Empty, HotelInformationRow("StarRating"))
+                                        .Append(String.Format("{0},", csvFieldValue))
+                                        csvFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("Category")), String.Empty, HotelInformationRow("Category"))
+                                        .Append(String.Format("{0},", csvFieldValue))
+
+                                        filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        For Each LinksRow As DataRow In filteredRowsLinks
+                                            filteredRowsLinks = dsGtaCityCacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                            If filteredRowsLinks.Count > 0 Then
+                                                csvFieldValuePrprty = IIf(IsDBNull(filteredRowsLinks(0)("MapPageLink")), String.Empty, filteredRowsLinks(0)("MapPageLink"))
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            Else
+                                                csvFieldValuePrprty = String.Empty
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End If
+                                        Next
+                                        filteredRowsAddressLines = dsGtaCityCacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsAddressLines.Count > 0 Then
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine1")), String.Empty, filteredRowsAddressLines(0)("AddressLine1"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine2")), String.Empty, filteredRowsAddressLines(0)("AddressLine2"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            address3And4.Clear()
+                                            address3And4.Append(IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine3")), String.Empty, filteredRowsAddressLines(0)("AddressLine3")))
+                                            address3And4.Append(" , " + IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine4")), String.Empty, filteredRowsAddressLines(0)("AddressLine4")))
+                                            csvFieldValuePrprty = address3And4.ToString()
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Telephone")), String.Empty, filteredRowsAddressLines(0)("Telephone"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Fax")), String.Empty, filteredRowsAddressLines(0)("Fax"))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            csvFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("WebSite")), String.Empty, filteredRowsAddressLines(0)("WebSite"))
+                                            .Append(String.Format("{0}", csvFieldValue))
+                                        Else
+                                            csvFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                            .Append(String.Format("{0},", csvFieldValue))
+                                        End If
+                                    End With
+                                    hotelDetailsCSVFileWriter.WriteLine(csvColumnValues.ToString())
+                                    hotelDetailsCSVFileWriter.Flush()
+
+                                    'txt Section of HotelDetails
+                                    txtColumnValues.Clear()
+                                    With txtColumnValues
+                                        .Append(String.Format("{0},", hotelIDPkey))
+                                        .Append(String.Format("{0},", dtCityCodeList.Rows(cityIndex)("City_ID")))
+                                        txtFieldValuePrprty = dtCityCodeList.Rows(cityIndex)("city_code")
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                        For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                            filteredRowsItem = dsGtaCityCacheResponse.Tables("Item").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                            If filteredRowsItem.Count > 0 Then
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = filteredRowsItem(0)("Item_Text")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            End If
+                                        Next
+                                        If filteredRowsItemDetail.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsItemDetail(0)("Copyright")), String.Empty, filteredRowsItemDetail(0)("Copyright"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsRoomTypes.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsRoomTypes(0)("RoomCount")), String.Empty, filteredRowsRoomTypes(0)("RoomCount"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        filteredRowsGeoCodes = dsGtaCityCacheResponse.Tables("GeoCodes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsGeoCodes.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Latitude")), String.Empty, filteredRowsGeoCodes(0)("Latitude"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsGeoCodes(0)("Longitude")), String.Empty, filteredRowsGeoCodes(0)("Longitude"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                        txtFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("StarRating")), String.Empty, HotelInformationRow("StarRating"))
+                                        .Append(String.Format("{0},", txtFieldValue))
+                                        txtFieldValuePrprty = IIf(IsDBNull(HotelInformationRow("Category")), String.Empty, HotelInformationRow("Category"))
+                                        .Append(String.Format("{0},", txtFieldValue))
+
+                                        filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        For Each LinksRow As DataRow In filteredRowsLinks
+                                            filteredRowsLinks = dsGtaCityCacheResponse.Tables("MapLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                            If filteredRowsLinks.Count > 0 Then
+                                                txtFieldValuePrprty = IIf(IsDBNull(filteredRowsLinks(0)("MapPageLink")), String.Empty, filteredRowsLinks(0)("MapPageLink"))
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            Else
+                                                txtFieldValuePrprty = String.Empty
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                            End If
+                                        Next
+                                        filteredRowsAddressLines = dsGtaCityCacheResponse.Tables("AddressLines").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                        If filteredRowsAddressLines.Count > 0 Then
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine1")), String.Empty, filteredRowsAddressLines(0)("AddressLine1"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine2")), String.Empty, filteredRowsAddressLines(0)("AddressLine2"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            address3And4.Clear()
+                                            address3And4.Append(IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine3")), String.Empty, filteredRowsAddressLines(0)("AddressLine3")))
+                                            address3And4.Append(" , " + IIf(IsDBNull(filteredRowsAddressLines(0)("AddressLine4")), String.Empty, filteredRowsAddressLines(0)("AddressLine4")))
+                                            txtFieldValuePrprty = address3And4.ToString()
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Telephone")), String.Empty, filteredRowsAddressLines(0)("Telephone"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("Fax")), String.Empty, filteredRowsAddressLines(0)("Fax"))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            txtFieldValuePrprty = IIf(IsDBNull(filteredRowsAddressLines(0)("WebSite")), String.Empty, filteredRowsAddressLines(0)("WebSite"))
+                                            .Append(String.Format("{0}", txtFieldValue))
+                                        Else
+                                            txtFieldValuePrprty = String.Empty
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                            .Append(String.Format("{0},", txtFieldValue))
+                                        End If
+                                    End With
+                                    insertToHtlDetails.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                    If htlIndex = totalHotels - 1 Then
+                                        insertToHtlDetails.Append(";")
+                                    Else
+                                        insertToHtlDetails.Append(",")
+                                    End If
+
+
+                                    filteredRowsLinks = dsGtaCityCacheResponse.Tables("Links").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each LinksRow As DataRow In filteredRowsLinks
+                                        filteredRowsImageLinks = dsGtaCityCacheResponse.Tables("ImageLinks").Select(String.Format("Links_Id={0}", LinksRow("Links_Id")))
+                                        For Each ImageLinksRow As DataRow In filteredRowsImageLinks
+                                            filteredRowsImageLink = dsGtaCityCacheResponse.Tables("ImageLink").Select(String.Format("ImageLinks_Id={0}", ImageLinksRow("ImageLinks_Id")))
+                                            totalImages += filteredRowsImageLink.Count
+                                            imgIndex = 0
+                                            For Each ImageLinkRow As DataRow In filteredRowsImageLink
+                                                'CSV section of hotelImages
+                                                csvColumnValues.Clear()
+                                                With csvColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                    csvFieldValuePrprty = ImageLinkRow("Image")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("ThumbNail")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Text")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Height")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = ImageLinkRow("Width")
+                                                    .Append(String.Format("{0}", csvFieldValue))
+                                                End With
+                                                hotelImagesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                                hotelImagesCsvFileWriter.Flush()
+                                                'txt Section of hotelImages
+                                                txtColumnValues.Clear()
+                                                With txtColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                    txtFieldValuePrprty = ImageLinkRow("Image")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("ThumbNail")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Text")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Height")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = ImageLinkRow("Width")
+                                                    .Append(String.Format("{0}", txtFieldValue))
+                                                End With
+                                                insertToHtlImages.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                                If htlIndex = totalHotels - 1 AndAlso imgIndex = filteredRowsImageLink.Count - 1 Then
+                                                    insertToHtlImages.Append(";")
+                                                Else
+                                                    insertToHtlImages.Append(",")
+                                                End If
+                                                imgIndex += 1
+                                            Next
+                                        Next
+                                    Next
+
+                                    filteredRowsRoomTypes = dsGtaCityCacheResponse.Tables("RoomTypes").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each RoomTypesRow As DataRow In filteredRowsRoomTypes
+                                        filteredRowsRoomType = dsGtaCityCacheResponse.Tables("RoomType").Select(String.Format("RoomTypes_Id={0}", RoomTypesRow("RoomTypes_Id")))
+                                        totalRoomTypes += filteredRowsRoomType.Count
+                                        roomTypeIndex = 0
+                                        For Each RoomTypeRow As DataRow In filteredRowsRoomType
+                                            'CSV section of RoomTypes
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = RoomTypeRow("RoomType_Text")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                            End With
+                                            HotelRoomTypesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelRoomTypesCsvFileWriter.Flush()
+                                            'txt Section of RoomTypes
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = RoomTypeRow("RoomType_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            insertToRoomTypes.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso roomTypeIndex = filteredRowsRoomType.Count - 1 Then
+                                                insertToRoomTypes.Append(";")
+                                            Else
+                                                insertToRoomTypes.Append(",")
+                                            End If
+                                            roomTypeIndex += 1
+                                        Next
+                                    Next
+                                    filteredRowsAreaDetails = dsGtaCityCacheResponse.Tables("AreaDetails").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each AreaDetailsRow As DataRow In filteredRowsAreaDetails
+                                        filteredRowsAreaDetail = dsGtaCityCacheResponse.Tables("AreaDetail").Select(String.Format("AreaDetails_Id={0}", AreaDetailsRow("AreaDetails_Id")))
+                                        totalAreas += filteredRowsAreaDetail.Count
+                                        areaDetlsIndex = 0
+                                        For Each AreaDetailRow As DataRow In filteredRowsAreaDetail
+                                            'CSV section of AreaDetails
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = AreaDetailRow("AreaDetail_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelAreaDetailsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelAreaDetailsCsvFileWriter.Flush()
+                                            'txt Section of AreaDetails
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = AreaDetailRow("AreaDetail_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            insertToAreaDetails.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso areaDetlsIndex = filteredRowsAreaDetail.Count - 1 Then
+                                                insertToAreaDetails.Append(";")
+                                            Else
+                                                insertToAreaDetails.Append(",")
+                                            End If
+                                            areaDetlsIndex += 1
+                                        Next
+                                    Next
+
+                                    filteredRowsFacilities = dsGtaCityCacheResponse.Tables("Facilities").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each FacilitiesRow As DataRow In filteredRowsFacilities
+                                        filteredRowsFacility = dsGtaCityCacheResponse.Tables("Facility").Select(String.Format("Facilities_Id={0}", FacilitiesRow("Facilities_Id")))
+                                        totalFacilities += filteredRowsFacility.Count
+                                        facilityIndex = 0
+                                        For Each FacilityRow As DataRow In filteredRowsFacility
+                                            'CSV section of Facilities
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = FacilityRow("Code")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                                csvFieldValuePrprty = FacilityRow("Facility_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelFacilitiesCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelFacilitiesCsvFileWriter.Flush()
+                                            'txt Section of Facilities
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = FacilityRow("Code")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                                txtFieldValuePrprty = FacilityRow("Facility_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            insertToFacilities.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso facilityIndex = filteredRowsFacility.Count - 1 Then
+                                                insertToFacilities.Append(";")
+                                            Else
+                                                insertToFacilities.Append(",")
+                                            End If
+                                            facilityIndex += 1
+                                        Next
+                                    Next
+
+                                    filteredRowsItemDetail = dsGtaCityCacheResponse.Tables("ItemDetail").Select(String.Format("ItemDetail_Id={0}", HotelInformationRow("ItemDetail_Id")))
+                                    For Each ItemDetailRow As DataRow In filteredRowsItemDetail
+                                        filteredRowsLocationDetails = dsGtaCityCacheResponse.Tables("LocationDetails").Select(String.Format("ItemDetail_Id={0}", ItemDetailRow("ItemDetail_Id")))
+                                        For Each LocationDetailsRow As DataRow In filteredRowsLocationDetails
+                                            filteredRowsLocation = dsGtaCityCacheResponse.Tables("Location").Select(String.Format("LocationDetails_Id={0}", LocationDetailsRow("LocationDetails_Id")))
+                                            totalLocations += filteredRowsLocation.Count
+                                            locationIndex = 0
+                                            For Each LocationRow As DataRow In filteredRowsLocation
+                                                'CSV section of Location
+                                                csvColumnValues.Clear()
+                                                With csvColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                    csvFieldValuePrprty = LocationRow("Code")
+                                                    .Append(String.Format("{0},", csvFieldValue))
+                                                    csvFieldValuePrprty = LocationRow("Location_Text")
+                                                    .Append(String.Format("{0}", csvFieldValue))
+                                                End With
+                                                HotelLocationsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                                HotelLocationsCsvFileWriter.Flush()
+                                                'txt section of Location
+                                                txtColumnValues.Clear()
+                                                With txtColumnValues
+                                                    .Append(String.Format("{0},", hotelIDPkey))
+                                                    .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                    txtFieldValuePrprty = LocationRow("Code")
+                                                    .Append(String.Format("{0},", txtFieldValue))
+                                                    txtFieldValuePrprty = LocationRow("Location_Text")
+                                                    .Append(String.Format("{0}", txtFieldValue))
+                                                End With
+                                                insertToLocationDetls.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                                If htlIndex = totalHotels - 1 AndAlso locationIndex = filteredRowsLocation.Count - 1 Then
+                                                    insertToLocationDetls.Append(";")
+                                                Else
+                                                    insertToLocationDetls.Append(",")
+                                                End If
+                                                locationIndex += 1
+                                            Next
+                                        Next
+                                    Next
+
+
+                                    filteredRowsReports = dsGtaCityCacheResponse.Tables("Reports").Select(String.Format("HotelInformation_Id={0}", HotelInformationRow("HotelInformation_Id")))
+                                    For Each ReportsRow As DataRow In filteredRowsReports
+                                        filteredRowsReport = dsGtaCityCacheResponse.Tables("Report").Select(String.Format("Reports_Id={0}", ReportsRow("Reports_Id")))
+                                        totalReports += filteredRowsReport.Count
+                                        repotDetlsIndex = 0
+                                        For Each ReportRow As DataRow In filteredRowsReport
+                                            'csv section of Report
+                                            csvColumnValues.Clear()
+                                            With csvColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeCsvFormat))
+                                                csvFieldValuePrprty = ReportRow("Type")
+                                                .Append(String.Format("{0},", csvFieldValue))
+                                                csvFieldValuePrprty = ReportRow("Report_Text")
+                                                .Append(String.Format("{0}", csvFieldValue))
+                                            End With
+                                            HotelReportsCsvFileWriter.WriteLine(csvColumnValues.ToString())
+                                            HotelReportsCsvFileWriter.Flush()
+                                            'txt section of Location
+                                            txtColumnValues.Clear()
+                                            With txtColumnValues
+                                                .Append(String.Format("{0},", hotelIDPkey))
+                                                .Append(String.Format("{0},", hotelCodeMultipleRowFormat))
+                                                txtFieldValuePrprty = ReportRow("Type")
+                                                .Append(String.Format("{0},", txtFieldValue))
+                                                txtFieldValuePrprty = ReportRow("Report_Text")
+                                                .Append(String.Format("{0}", txtFieldValue))
+                                            End With
+                                            insertToReportDetls.Append(String.Format("({0})", txtColumnValues.ToString()))
+                                            If htlIndex = totalHotels - 1 AndAlso repotDetlsIndex = filteredRowsReport.Count - 1 Then
+                                                insertToReportDetls.Append(";")
+                                            Else
+                                                insertToReportDetls.Append(",")
+                                            End If
+                                            repotDetlsIndex += 1
+                                        Next
+                                    Next
+                                    htlIndex += 1
+                                    hotelIDPkey += 1
+                                Next
+                            End If
+
+                        Catch ex As Exception
+                            LogError(ex)
+                        Finally
+                            'Fill the Query to QueryCollection
+                            queryCollection.Clear()
+
+                            queryCollection.Add(insertToHtlDetails.ToString())
+                            queryCollection.Add(insertToHtlImages.ToString())
+                            queryCollection.Add(insertToRoomTypes.ToString())
+                            queryCollection.Add(insertToAreaDetails.ToString())
+                            queryCollection.Add(insertToFacilities.ToString())
+                            queryCollection.Add(insertToLocationDetls.ToString())
+                            queryCollection.Add(insertToReportDetls.ToString())
+                            Try
+                                SaveToDB(queryCollection)
+                            Catch mySqlError As MySqlException
+                                LogError(mySqlError)
+                            End Try
+
+
+                            'Save to CacheStatus table
+                            totalRows = totalHotels + totalImages + totalAreas + totalReports + totalRoomTypes + totalFacilities + totalLocations
+                            insertQuery = String.Format("INSERT INTO gtacachestatus(Country_Code,City_ID,CityCode,TotalRows,NoOfHotels,NoOfImages,NoOfAreas,NoOfReports,NoOfRoomTypes,NoOfFacilities,NoOfLocations,ErrorMessage) VALUES ('{0}',{1},'{2}',{3},{4},{5},{6},{7},{8},{9},{10},'{11}')", countryCode, cityID, cityCode, totalRows, totalHotels, totalImages, totalAreas, totalReports, totalRoomTypes, totalFacilities, totalLocations, errorMessage.ToString())
+                            Try
+                                SaveToDB()
+                            Catch mySqlError As MySqlException
+                                LogError(mySqlError)
+                            End Try
+
+
+                            'Get the Index Size of tables & Save the Ndex sizes
+                            ndxSizeCollection = GetNdxSizes()
+                            insertQuery = String.Format("INSERT INTO gtacachendxsize (Country_Code,City_ID,CityCode,TotalNdxInMB,HtlDetailsNdxInMB,HtlImagesNdxInMB,HtlRoomTypesNdxInMB,HtlAreaDtlsNdxInMB,HtlFacilitiesNdxInMB,HtlLocationsNdxInMB,HtlReportsNdxInMB) VALUES ('{0}',{1},'{2}',{3},{4},{5},{6},{7},{8},{9},{10})", countryCode, cityID, cityCode, ndxSizeCollection.Sum(), ndxSizeCollection(0), ndxSizeCollection(1), ndxSizeCollection(2), ndxSizeCollection(3), ndxSizeCollection(4), ndxSizeCollection(5), ndxSizeCollection(6))
+                            Try
+                                SaveToDB()
+                            Catch mySqlError As MySqlException
+                                LogError(mySqlError)
+                            End Try
+
+                        End Try
+                    End If
+
+                Next
+            End Using
+
+        Catch ex As Exception
+            LogError(ex)
+        End Try
+    End Sub
+    Private Sub LogError(ByVal exceptionCaught As Exception)
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            errorMessage.AppendLine(exceptionCaught.ToString())
+            Using errorLogFileWriter = New StreamWriter(errorLogPath, True)
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.WriteLine(String.Format("Error occured on: {0}", DateTime.Now.ToString()))
+                errorLogFileWriter.WriteLine(errorMessage.ToString())
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.Flush()
+            End Using
+        Catch ex As Exception
+            errorMessage.AppendLine(ex.ToString())
+            Using errorLogFileWriter = New StreamWriter(errorLogPath, True)
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.WriteLine(String.Format("Error occured on: {0}", DateTime.Now.ToString()))
+                errorLogFileWriter.WriteLine(errorMessage.ToString())
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.Flush()
+            End Using
+        End Try
+    End Sub
+    Private Sub LogError(ByVal exceptionCaught As MySqlException)
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Try
+            errorMessage.AppendLine(exceptionCaught.ToString())
+            Using errorLogFileWriter = New StreamWriter(errorLogPath, True)
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.WriteLine(String.Format("Error occured on: {0}", DateTime.Now.ToString()))
+                errorLogFileWriter.WriteLine(errorMessage.ToString())
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.Flush()
+            End Using
+        Catch ex As Exception
+            errorMessage.AppendLine(ex.ToString())
+            Using errorLogFileWriter = New StreamWriter(errorLogPath, True)
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.WriteLine(String.Format("Error occured on: {0}", DateTime.Now.ToString()))
+                errorLogFileWriter.WriteLine(errorMessage.ToString())
+                errorLogFileWriter.WriteLine("--------------------------")
+                errorLogFileWriter.Flush()
+            End Using
+        End Try
+    End Sub
+    Private Function GetNdxSizes() As List(Of Decimal)
+        Dim ndxSizeCollection As List(Of Decimal) = New List(Of Decimal)
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Dim queryCollection As List(Of String) = New List(Of String)
+        Try
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtahoteldetails"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtahotelimages"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtaroomtypes"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtaareadetails"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtafecilitydetails"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtalocationdetails"))
+            queryCollection.Add(String.Format("SELECT index_length/POWER(1024,2) NDXSIZEInMB FROM INFORMATION_SCHEMA.TABLES 	WHERE table_schema='{0}' AND table_name='{1}';", "wcprdb2bmasdb", "atsgen_m_gtareportdetails"))
+            ndxSizeCollection = ReadCountByCollection(queryCollection)
+        Catch ex As Exception
+            LogError(ex)
+        Finally
+            GetNdxSizes = ndxSizeCollection
+        End Try
+    End Function
+
+
+#End Region
+
+    Private Sub TestCityList()
+        Dim countryList() As String = {"CY"}
+        Dim dsCoutrysCityList As DataSet = New DataSet()
+        Dim rowCount As UShort = 0
+        Dim cityColumnValues As StringBuilder = New StringBuilder(String.Empty)
+        Dim strScript As StringBuilder = New StringBuilder(String.Empty)
+        Dim insertTogtacountrycities As StringBuilder = New StringBuilder(String.Empty)
+        Dim errorMessage As StringBuilder = New StringBuilder(String.Empty)
+        Try
+
+            For countryIndex = 0 To countryList.Count - 1
+                Try
+                    rowCount = 0
+                    errorMessage.Clear()
+                    GenerateGTACountrysCityListRequest(countryList(countryIndex))
+                    GTAServiceCall()
+                    errorMessage.Append(gtaServiceErrorMessage)
+                    If Not String.IsNullOrEmpty(gtaServiceResponse) AndAlso String.IsNullOrEmpty(gtaServiceErrorMessage) Then
+                        dsCoutrysCityList.Reset()
+                        dsCoutrysCityList.ReadXml(New StringReader(gtaServiceResponse))
+                        dsCoutrysCityList.WriteXml("E:\GTACache\XMLS\CyprusCities.xml")
+                        dsCoutrysCityList.WriteXmlSchema("E:\GTACache\XMLS\CyprusCitiesXSD.xml")
+                        rowCount = dsCoutrysCityList.Tables("City").Rows.Count
+                    End If
+
+                Catch ex As Exception
+                    errorMessage.Append(ex.ToString())
+                Finally
+
+                End Try
+
+            Next
+
+        Catch ex As Exception
+            Console.WriteLine(ex.ToString())
+        End Try
+    End Sub
+
+
+#Region "DB Functions"
+
+
+    Private Sub SaveToDB()
+        Dim dataBaseName As String = "wcprdb2bmasdb"
+        Dim serverIP As String = "192.168.10.112"
+        Dim userID As String = "wcusr"
+        Dim pwd As String = "wc123"
+        Dim connectionString As String = String.Format("Persist Security Info=False;Integrated Security=FALSE;database={0};server={1};user id={2};pwd={3};Max Pool Size=1000;Pooling=true;", dataBaseName, serverIP, userID, pwd)
+        Dim rowsAffected As UInt32 = 0
+
+
+        Using myConnection = New MySqlConnection(connectionString)
+            myConnection.Open()
+            Using myCommand = New MySqlCommand(insertQuery, myConnection)
+                Using myTxion = myConnection.BeginTransaction()
+                    rowsAffected = myCommand.ExecuteNonQuery()
+                    myTxion.Commit()
+                End Using
+            End Using
+        End Using
+
+    End Sub
+    Private Sub SaveToDB(ByVal queryCollection As List(Of String))
+
+        Dim dataBaseName As String = "wcprdb2bmasdb"
+        Dim serverIP As String = "192.168.10.112"
+        Dim userID As String = "wcusr"
+        Dim pwd As String = "wc123"
+        Dim connectionString As String = String.Format("Persist Security Info=False;Integrated Security=FALSE;database={0};server={1};user id={2};pwd={3};Max Pool Size=1000;Pooling=true;", dataBaseName, serverIP, userID, pwd)
+        Dim rowsAffected As UInt32 = 0
+
+
+        Using myConnection = New MySqlConnection(connectionString)
+            myConnection.Open()
+            Using myCommand = New MySqlCommand()
+                Using myTxion = myConnection.BeginTransaction()
+                    myCommand.Connection = myConnection
+                    For Each insertQuery As String In queryCollection
+                        If Not String.IsNullOrEmpty(insertQuery) Then
+                            myCommand.CommandText = insertQuery
+                            rowsAffected = myCommand.ExecuteNonQuery()
+                        End If
+                    Next
+                    myTxion.Commit()
+                End Using
+            End Using
+        End Using
+
+    End Sub
+    Private Function ReadFromDB() As DataTable
+        Dim dtResult As DataTable = New DataTable()
+        Dim dataBaseName As String = "wcprdb2bmasdb"
+        Dim serverIP As String = "192.168.10.112"
+        Dim userID As String = "wcusr"
+        Dim pwd As String = "wc123"
+        Dim connectionString As String = String.Format("Persist Security Info=False;Integrated Security=FALSE;database={0};server={1};user id={2};pwd={3};Max Pool Size=1000;Pooling=true;", dataBaseName, serverIP, userID, pwd)
+
+
+        Using myConnection = New MySqlConnection(connectionString)
+            myConnection.Open()
+            Using myCommand = New MySqlCommand(selectQuery, myConnection)
+                Using myReader = myCommand.ExecuteReader()
+                    dtResult.Load(myReader)
+                End Using
+            End Using
+        End Using
+        ReadFromDB = dtResult
+    End Function
+
+    Private Function ReadCount() As Int32
+        Dim dataBaseName As String = "wcprdb2bmasdb"
+        Dim serverIP As String = "192.168.10.112"
+        Dim userID As String = "wcusr"
+        Dim pwd As String = "wc123"
+        Dim connectionString As String = String.Format("Persist Security Info=False;Integrated Security=FALSE;database={0};server={1};user id={2};pwd={3};Max Pool Size=1000;Pooling=true;", dataBaseName, serverIP, userID, pwd)
+
+        Dim count As Int32 = 0
+        Using myConnection = New MySqlConnection(connectionString)
+            myConnection.Open()
+            Using myCommand = New MySqlCommand(selectQuery, myConnection)
+                count = Convert.ToInt32(myCommand.ExecuteScalar())
+            End Using
+        End Using
+        ReadCount = count
+    End Function
+
+    Private Function ReadCountByCollection(ByVal queryCollection As List(Of String)) As List(Of Decimal)
+        Dim lstResult As List(Of Decimal) = New List(Of Decimal)
+        Dim dataBaseName As String = "wcprdb2bmasdb"
+        Dim serverIP As String = "192.168.10.112"
+        Dim userID As String = "wcusr"
+        Dim pwd As String = "wc123"
+        Dim connectionString As String = String.Format("Persist Security Info=False;Integrated Security=FALSE;database={0};server={1};user id={2};pwd={3};Max Pool Size=1000;Pooling=true;", dataBaseName, serverIP, userID, pwd)
+
+        Dim count As Int32 = 0
+        Using myConnection = New MySqlConnection(connectionString)
+            myConnection.Open()
+            Using myCommand = New MySqlCommand()
+                myCommand.Connection = myConnection
+                For Each query As String In queryCollection
+                    myCommand.CommandText = query
+                    lstResult.Add(Convert.ToDecimal(myCommand.ExecuteScalar()))
+                Next
+            End Using
+        End Using
+        ReadCountByCollection = lstResult
+    End Function
+
+
+#End Region
+
+
+
+End Module
