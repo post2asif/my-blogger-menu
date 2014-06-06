@@ -1,0 +1,201 @@
+DELIMITER ;
+create procedure gtaCacheSP(in xmlData LONGTEXT)
+begin
+
+set @htlIndex = 1;
+SET @imgIndex = 1;
+set @locIndex = 1;
+set @facDetlsIndex = 1;
+set @roomTypeIndex = 1;
+set @reptDetlsIndex = 1;
+set @areaDetlsIndex = 1;
+
+
+set @totalHotelCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails)');
+
+	while @htlIndex <= @totalHotelCount do
+
+		INSERT INTO atsgen_m_gtahoteldetails 
+					(
+						City_Id,
+						CityCode,
+						HotelCode,
+						HotelName,
+						Copyright,
+						TotalRooms,
+						Latitude,
+						Longitude,
+						StarRating,
+						Category,
+						MapPageLink,
+						Address1,
+						Address2,
+						Address3,
+						Telephone,
+						Fax,
+						Website
+					)
+		VALUES	
+					(
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/City_Id'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/CityCode'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/HotelCode'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/HotelName'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Copyright'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/TotalRooms'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Latitude'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Longitude'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/StarRating'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Category'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/MapPageLink'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Address1'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Address2'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Address3'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Telephone'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Fax'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Website')
+					);
+		SET @lastHotelID = LAST_INSERT_ID();
+		 
+		####### INSERT IMAGES AGAINST AN HOTEL ##############
+		set @totalImageCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/Images)');
+		set @imgIndex = 1;
+		while @imgIndex <= @totalImageCount do
+
+			INSERT INTO atsgen_m_gtahotelimages
+					(
+						Hotel_ID,
+						ItemCode,
+						ImageLink,
+						ThumbNail,
+						ImageDetails,
+						Height,
+						Width
+					)
+			VALUES	
+					(
+						@lastHotelID,
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/ItemCode'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/ImageLink'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/ThumbNail'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/ImageDetails'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/Height'),
+						extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/Images[$@imgIndex]/Width')
+					);
+			SET @imgIndex = @imgIndex + 1;
+		END WHILE;
+		
+
+		####### INSERT LOCATIONS AGAINST AN HOTEL ##############
+		set @totalLocationCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/LocationDetails)');
+		set @locIndex = 1;
+		while @locIndex <= @totalLocationCount do
+
+	          INSERT INTO atsgen_m_gtalocationdetails
+			(
+    			Hotel_ID,
+			ItemCode,
+			LocationCode,
+			LocationName
+			)
+		  values
+			(
+			@lastHotelID,
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/LocationDetails[$@locIndex]/ItemCode'),
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/LocationDetails[$@locIndex]/LocationCode'),
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/LocationDetails[$@locIndex]/LocationName')
+			);
+		  SET @locIndex = @locIndex + 1;
+		END WHILE;
+
+		####### INSERT FacilityDetails AGAINST AN HOTEL ##############
+		set @totalFacilityDetailsCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/FacilityDetails)');
+		set @facDetlsIndex = 1;
+		while @facDetlsIndex <= @totalFacilityDetailsCount do
+
+		  INSERT INTO atsgen_m_gtafecilitydetails
+			(
+		         Hotel_ID,
+			 ItemCode,
+			 FecilityCode,
+			 FecilityDetails
+			)
+		  values		
+			(
+			@lastHotelID,
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/FacilityDetails[$@facDetlsIndex]/ItemCode'),
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/FacilityDetails[$@facDetlsIndex]/FecilityCode'),
+			extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/FacilityDetails[$@facDetlsIndex]/FecilityDetails')
+			);
+
+		  SET @facDetlsIndex = @facDetlsIndex + 1;
+		END WHILE;
+
+		####### INSERT RoomTypes AGAINST AN HOTEL ##############
+		set @totalRoomTypesCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/RoomTypes)');
+		set @roomTypeIndex = 1;
+		while @roomTypeIndex <= @totalRoomTypesCount do
+			
+			INSERT INTO atsgen_m_gtaroomtypes
+		          (
+			   Hotel_ID,
+			   ItemCode,
+			   RoomTypes
+			  )
+			VALUES
+			  (
+			   @lastHotelID,
+			   extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/RoomTypes[$@roomTypeIndex]/ItemCode'),
+			   extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/RoomTypes[$@roomTypeIndex]/RoomTypes')
+			  );
+
+			SET @roomTypeIndex = @roomTypeIndex + 1;
+		END WHILE;
+
+		####### INSERT ReportDetails AGAINST AN HOTEL ##############
+		set @totalReportDetailsCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/ReportDetails)');
+		set @reptDetlsIndex = 1;
+		WHILE @reptDetlsIndex <= @totalReportDetailsCount do
+
+			INSERT INTO atsgen_m_gtareportdetails
+			 (
+			  Hotel_ID,
+			  ItemCode,
+			  Type,
+			  ReportDetails
+			 )
+			VALUES
+			 (
+			  @lastHotelID,
+			  extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/ReportDetails[$@reptDetlsIndex]/ItemCode'),
+			  extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/ReportDetails[$@reptDetlsIndex]/Type'),
+			  extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/ReportDetails[$@reptDetlsIndex]/ReportDetails')
+			);
+		  SET @reptDetlsIndex = @reptDetlsIndex + 1;
+		END WHILE;
+
+		####### INSERT AreaDetails AGAINST AN HOTEL ##############
+		set @totalAreaDetailsCount = extractValue(xmlData,'count(/GTACacheDataSet/HotelDetails[$@htlIndex]/AreaDetails)');
+		SET @areaDetlsIndex = 1;
+		WHILE @areaDetlsIndex <= @totalAreaDetailsCount do
+
+			INSERT INTO atsgen_m_gtaareadetails
+		         (
+			  Hotel_ID,
+			  ItemCode,
+			  AreaDetails
+			)
+			values
+         		(
+	                 @lastHotelID,
+			 extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/AreaDetails[$@areaDetlsIndex]/ItemCode'),
+			 extractvalue(xmlData,'/GTACacheDataSet/HotelDetails[$@htlIndex]/AreaDetails[$@areaDetlsIndex]/AreaDetails')
+			);
+
+			SET @areaDetlsIndex = @areaDetlsIndex + 1;
+		END WHILE;
+
+		SET @htlIndex = @htlIndex + 1;
+	END WHILE;
+END //
+DELIMITER ;
