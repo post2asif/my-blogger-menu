@@ -1,0 +1,64 @@
+<?xml version="1.0" standalone="yes"?>
+<GTACacheDataSet>
+  <HotelDetails>
+    <Hotel_ID>1</Hotel_ID>
+    <City_Id>98</City_Id>
+    <HotelCode>ABC</HotelCode>
+    <HotelName>ABC Arabian Suites</HotelName>
+    <Copyright>© GTA 2014</Copyright>
+    <TotalRooms>60</TotalRooms>
+    <Latitude>25.250426610000000</Latitude>
+    <Longitude>55.286186390000000</Longitude>
+    <StarRating>4</StarRating>
+    <Category>Superior First Class Modern Hotel</Category>
+    <MapPageLink>http://interface.gta-travel.com/gtaxml/IMapLink.jsp?prov=3&amp;cty=DXB&amp;itm=ABC&amp;typ=HH</MapPageLink>
+    <Address1>P.O.Box 113770, Bur Dubai, Opp Port</Address1>
+    <Address2>Behind New Gold Souk</Address2>
+    <Address3>,United Arab Emirates</Address3>
+    <Telephone>971-4-3984304</Telephone>
+    <Fax>971-4-3984305</Fax>
+    <Website>http://www.arabiansuites.ae</Website>
+    <CityCode>DXB</CityCode>
+    <ReportDetails>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <Type>location</Type>
+      <ReportDetails>Centrally located in Bur Dubai, close to Dubai's Business District and the famous Bank Street. Ideally located for those visiting the Dubai World Trade Centre and Exhibitions Halls, Sheikh Zayed Road and Business Bay, a mere 5 minutes drive away.</ReportDetails>
+    </ReportDetails>
+    <RoomTypes>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <RoomTypes>Single rooms</RoomTypes>
+    </RoomTypes>
+    <FacilityDetails>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <FecilityCode>*LS</FecilityCode>
+      <FecilityDetails>Medium sized lobby</FecilityDetails>
+    </FacilityDetails>
+    <LocationDetails>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <LocationCode>G1</LocationCode>
+      <LocationName>Central</LocationName>
+    </LocationDetails>
+    <Images>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <ImageLink>http://images.gta-travel.com/HH/Images/EM/DXB/DXB-ABC-1.jpg</ImageLink>
+      <ThumbNail>http://images.gta-travel.com/HH/Images/EM/DXBth/DXB-ABC-1.jpg</ThumbNail>
+      <ImageDetails>Exterior</ImageDetails>
+      <Height>213</Height>
+      <Width>360</Width>
+    </Images>
+    <AreaDetails>
+      <Hotel_ID>1</Hotel_ID>
+      <ItemCode>ABC</ItemCode>
+      <AreaDetails>1 kms to city centre</AreaDetails>
+    </AreaDetails>
+    </HotelDetails>
+
+      <HotelDetails>
+          ....
+      </HotelDetails>
+  </GTACacheDataSet>
